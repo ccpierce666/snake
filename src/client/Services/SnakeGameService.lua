@@ -1,0 +1,64 @@
+local ReplicatedStorage = game:GetService("ReplicatedStorage")
+
+local Knit = _G.KnitInstance
+if not Knit then
+    Knit = require(ReplicatedStorage.Common.Knit)
+end
+
+print("[Client SnakeGameService] 获取 Knit 实例")
+
+-- 创建本地信号
+local FoodChangedSignal = Knit.CreateSignal()
+local LeaderboardChangedSignal = Knit.CreateSignal()
+local DirectionChangedSignal = Knit.CreateSignal()
+local MoneyChangedSignal = Knit.CreateSignal()
+local SnakeSpawnedSignal = Knit.CreateSignal()
+local SnakeDiedSignal = Knit.CreateSignal()
+local GiftUpdateSignal = Knit.CreateSignal() -- 新增
+
+local SnakeGameService = Knit.CreateService {
+    Name = "SnakeGameService",
+    Client = {
+        FoodChanged = FoodChangedSignal,
+        LeaderboardChanged = LeaderboardChangedSignal,
+        DirectionChanged = DirectionChangedSignal,
+        MoneyChanged = MoneyChangedSignal,
+        SnakeSpawned = SnakeSpawnedSignal,
+        SnakeDied = SnakeDiedSignal,
+        GiftUpdate = GiftUpdateSignal, -- 新增
+    },
+}
+
+-- 暴露信号到根，方便Controller调用
+SnakeGameService.FoodChanged = FoodChangedSignal
+SnakeGameService.LeaderboardChanged = LeaderboardChangedSignal
+SnakeGameService.DirectionChanged = DirectionChangedSignal
+SnakeGameService.MoneyChanged = MoneyChangedSignal
+SnakeGameService.SnakeSpawned = SnakeSpawnedSignal
+SnakeGameService.SnakeDied = SnakeDiedSignal
+SnakeGameService.GiftUpdate = GiftUpdateSignal -- 新增
+
+-- 声明服务器方法（客户端代理会拦截这些调用）
+function SnakeGameService:GetGameState()
+    -- 客户端版本只是占位符，实际调用会被 Knit 代理转发到服务器
+end
+
+function SnakeGameService:ChangeDirection(direction)
+    -- 客户端版本只是占位符，实际调用会被 Knit 代理转发到服务器
+end
+
+function SnakeGameService:RequestRespawn()
+    -- 客户端版本只是占位符，实际调用会被 Knit 代理转发到服务器
+end
+
+function SnakeGameService:GetGiftData()
+end
+
+function SnakeGameService:ClaimGift(index)
+end
+
+function SnakeGameService:KnitStart()
+    print("[Client SnakeGameService] KnitStart")
+end
+
+return SnakeGameService

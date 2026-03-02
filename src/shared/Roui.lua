@@ -301,17 +301,37 @@ function Roui.Leaderboard(props, children)
     return el("Frame", props, children or {})
 end
 
--- Overlay component (No changes)
+-- Overlay component
 function Roui.Overlay(props, children)
+    local transparency = props.Transparency or 0.5
+    local onClose = props.OnClose
+    -- Remove custom props to avoid issues
+    if props.Transparency then props.Transparency = nil end
+    if props.OnClose then props.OnClose = nil end
+    
     props = mergeProps(props, {
         Size = UDim2.new(1, 0, 1, 0),
         BackgroundColor3 = Color3.fromRGB(0, 0, 0),
+        BackgroundTransparency = transparency,
         BorderSizePixel = 0,
-        Transparency = props.Transparency or 0.5,
         ZIndex = 100,
+        Active = true, -- Block clicks
     })
     
-    return el("Frame", props, children or {})
+    local overlayChildren = children or {}
+    
+    -- If onClose is provided, add a button to close by clicking the overlay
+    if onClose then
+        overlayChildren.CloseOverlay = el("TextButton", {
+            Size = UDim2.new(1, 0, 1, 0),
+            BackgroundTransparency = 1,
+            Text = "",
+            ZIndex = 99, -- Below the panel
+            [Roact.Event.Activated] = onClose,
+        })
+    end
+    
+    return el("Frame", props, overlayChildren)
 end
 
 return Roui

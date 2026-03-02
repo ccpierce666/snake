@@ -69,12 +69,20 @@ local function hideCharacter(player)
 end
 
 local function calculateBodySize(currentLength)
-    if currentLength < 10 then return 0.33
-    elseif currentLength < 100 then return 0.66
-    elseif currentLength < 1000 then return 1.32
-    elseif currentLength < 10000 then return 2.64
-    elseif currentLength < 100000 then return 5.28
-    else return 10.56 end
+    -- 对应 UPDATE_LOG.md 的四个阶段
+    if currentLength < 10000 then
+        -- 早期: 0.6 (最小码) -> 1.5 (极慢增长)
+        return 0.6 + (currentLength / 10000) * 0.9
+    elseif currentLength < 100000 then
+        -- 中期: 1.5 -> 3.0 (逐步加速)
+        return 1.5 + ((currentLength - 10000) / 90000) * 1.5
+    elseif currentLength < 500000 then
+        -- 后期: 3.0 -> 8.0 (快速膨胀)
+        return 3.0 + ((currentLength - 100000) / 400000) * 5.0
+    else
+        -- 超期: 8.0 固定 (身体不变大)
+        return 8.0
+    end
 end
 
 local function createEnvironment(parent)
@@ -122,6 +130,17 @@ function SnakeGame3DView.Init()
     -- 客户端创建地面和围墙
     createEnvironment(gameFolder)
 
+    -- 增加：高频率角色隐藏循环，确保彻底不显示默认角色
+    task.spawn(function()
+        while true do
+            task.wait(1.0)
+            local char = Players.LocalPlayer.Character
+            if char then
+                hideCharacter(Players.LocalPlayer)
+            end
+        end
+    end)
+
     -- 创建虚线圈 (20段)
     for i = 1, 20 do
         local p = createPart(gameFolder, Color3.new(1,1,1), 0.2, Enum.PartType.Block, Enum.Material.Neon)
@@ -142,12 +161,9 @@ function SnakeGame3DView.Init()
                 local newHead = head + dir * SNAKE_SPEED * GAME_TICK
 
                 table.insert(localPlayerSnakeState.body, 1, newHead)
-
-                if (localPlayerSnakeState.growQueue or 0) > 0 then
-                    localPlayerSnakeState.growQueue = localPlayerSnakeState.growQueue - 1
-                else
-                    table.remove(localPlayerSnakeState.body)
-                end
+                
+                -- 完全由服务器驱动生长，本地不再预测
+                table.remove(localPlayerSnakeState.body)
             end
         end
 
@@ -166,11 +182,19 @@ function SnakeGame3DView.Init()
         if localPlayerSnakeState and localPlayerSnakeState.body and #localPlayerSnakeState.body > 0 then
             local head = localPlayerSnakeState.body[1]
             ringAngleOffset = ringAngleOffset - 0.025
+            
+            -- 动态计算圈的大小 (同步服务器 PICKUP_RADIUS 逻辑)
+            local currentScore = localPlayerSnakeState.logicalLength or #localPlayerSnakeState.body
+            local bodySize = calculateBodySize(currentScore)
+            local currentRingRadius = 5.5 + (bodySize * 0.8) -- 稍微比蛇身大一点
+
             for _, dash in ipairs(ringDashes) do
                 local a = dash.angle + ringAngleOffset
-                local x = head.X + math.cos(a) * RING_RADIUS
-                local z = head.Z + math.sin(a) * RING_RADIUS
+                local x = head.X + math.cos(a) * currentRingRadius
+                local z = head.Z + math.sin(a) * currentRingRadius
                 dash.part.CFrame = CFrame.new(x, 0.45, z) * CFrame.Angles(0, -(a + math.pi / 2), 0)
+                -- 调整虚线的大小
+                dash.part.Size = Vector3.new(0.8 + bodySize * 0.1, 0.2, 0.4 + bodySize * 0.05)
             end
         else
             for _, dash in ipairs(ringDashes) do
@@ -215,7 +239,7 @@ function SnakeGame3DView.Init()
             end
         end
 
-        local currentLength = localPlayerSnakeState and #localPlayerSnakeState.body or 0
+        local currentLength = localPlayerSnakeState and (localPlayerSnakeState.logicalLength or #localPlayerSnakeState.body) or 0
         local bodySize = calculateBodySize(currentLength)
 
         if localPlayerSnakeState then
@@ -223,7 +247,8 @@ function SnakeGame3DView.Init()
         end
 
         for _, s in pairs(otherSnakes) do
-            addSnakeRenderPoints(s.body, false, bodySize)
+            local otherBodySize = calculateBodySize(s.logicalLength or #s.body)
+            addSnakeRenderPoints(s.body, false, otherBodySize)
         end
 
         local needed = #snakePositions
@@ -262,16 +287,21 @@ function SnakeGame3DView.Init()
     end)
 end
 
-function SnakeGame3DView.SpawnSnake(userId, spawnPos, color)
+function SnakeGame3DView.SpawnSnake(userId, body, color)
     userId = tostring(userId)
     local localUserId = tostring(Players.LocalPlayer.UserId)
     
+    -- Ensure body is a table
+    if typeof(body) == "Vector3" then
+        body = {body}
+    end
+
     if userId == localUserId then
         local p = Players:GetPlayerByUserId(tonumber(userId))
         if p then hideCharacter(p) end
 
         localPlayerSnakeState = {
-            body = {spawnPos},
+            body = body,
             direction = Vector3.new(1, 0, 0),
             targetDirection = Vector3.new(0, 0, 0),
             isMoving = false,
@@ -283,7 +313,7 @@ function SnakeGame3DView.SpawnSnake(userId, spawnPos, color)
         if p then hideCharacter(p) end
 
         otherSnakes[userId] = {
-            body = {spawnPos},
+            body = body,
             direction = Vector3.new(1, 0, 0),
             targetDirection = Vector3.new(0, 0, 0),
             isMoving = false,
@@ -301,20 +331,36 @@ function SnakeGame3DView.UpdateSnakeData(userId, data)
     
     -- Spawn if not exists
     if not snake then
-        local pos = Vector3.new(0,0,0)
-        if data.body and data.body[1] then
-             pos = data.body[1]
-        elseif data.pos then -- Fallback if server sends 'pos' instead of body
-             pos = data.pos 
+        local body = {Vector3.new(0,0,0)}
+        if data.body then
+             body = data.body
+        elseif data.pos then
+             body = {data.pos}
         end
-        SnakeGame3DView.SpawnSnake(userId, pos)
+        SnakeGame3DView.SpawnSnake(userId, body)
         snake = (userId == localUserId) and localPlayerSnakeState or otherSnakes[userId]
     end
     
-    -- Update Direction
-    if snake and data.dir then
-        snake.targetDirection = data.dir
-        snake.isMoving = data.isMoving
+    -- Update Direction, logical length AND body length
+    if snake then
+        if data.dir then
+            snake.targetDirection = data.dir
+            snake.isMoving = data.isMoving
+        end
+        if data.score then
+            snake.logicalLength = data.score
+        end
+        -- 核心修复：同步服务器的身体节数，确保生长后长度增加
+        if data.body then
+            if userId ~= localUserId then
+                snake.body = data.body
+            else
+                -- 对于本地蛇，如果服务器更长（说明发生了生长），则采纳服务器的长度
+                if #data.body > #snake.body then
+                    snake.body = data.body
+                end
+            end
+        end
     end
 end
 

@@ -24,10 +24,12 @@ function SnakeGameController:KnitStart()
         leaderboard = {},
         food = {},
         autoMode = false,
+        giftData = { timePlayed = 0, claimed = {} }, -- 每日礼物数据
+        showGiftPanel = false, -- 是否显示礼物面板
     }
     local lastScore = 0
 
-    -- 2. 定义自动寻路逻辑 & 回调 (Before UI Start)
+    -- 2. 定义回调逻辑 (Before UI Start)
     local isAutoMode = false
     local autoTimer = 0
     local SnakeGameService -- Will be fetched later
@@ -47,8 +49,41 @@ function SnakeGameController:KnitStart()
         end
     end
 
+    SnakeGameUI.Callbacks.onToggleGiftPanel = function()
+        ClientState.showGiftPanel = not ClientState.showGiftPanel
+        SnakeGameUI.Update(ClientState)
+    end
+
+    SnakeGameUI.Callbacks.onClaimGift = function(index)
+        print("[SnakeGameController] 点击领取礼物, 索引:", index)
+        if not SnakeGameService then 
+            warn("[SnakeGameController] SnakeGameService 尚未就绪")
+            return 
+        end
+        
+        -- 调用服务器领取
+        task.spawn(function()
+            print("[SnakeGameController] 发起服务器请求: ClaimGift(" .. tostring(index) .. ")")
+            local success, result, msg = pcall(function()
+                return SnakeGameService:ClaimGift(index)
+            end)
+            
+            if success then
+                if result then
+                    print("[Gift] 领取成功: " .. index)
+                    -- 等待一下，让服务器发送 GiftUpdate 信号
+                    task.wait(0.3)
+                    SnakeGameUI.Update(ClientState)
+                else
+                    warn("[Gift] 服务器返回领取失败: " .. tostring(msg or "原因未知"))
+                end
+            else
+                warn("[Gift] 远程调用异常: " .. tostring(result))
+            end
+        end)
+    end
+
     -- 3. 初始化 UI 和 3D 视图
-    -- 此时 SnakeGameUI.Callbacks.onAutoToggle 已经定义，SnakeGameUI.Start() 渲染的按钮将带有正确的点击事件
     SnakeGameUI.Start()
     SnakeGame3DView.Init()
 
@@ -85,23 +120,30 @@ function SnakeGameController:KnitStart()
         end)
     end
 
-    -- 排行榜更新
+    -- 排行榜更新 (现在也包含全量位置同步)
     if SnakeGameService.LeaderboardChanged then
-        SnakeGameService.LeaderboardChanged:Connect(function(leaderboard)
+        SnakeGameService.LeaderboardChanged:Connect(function(leaderboard, snakesData)
             ClientState.leaderboard = leaderboard
-
-            -- 检测本地分数变化，驱动蛇的生长
             local localId = tostring(Players.LocalPlayer.UserId)
+
+            -- 1. 更新所有蛇的逻辑长度和物理坐标
             for _, entry in ipairs(leaderboard) do
-                if tostring(entry.userId) == localId then
-                    local newScore = entry.score or 0
-                    if newScore > lastScore then
-                        local diff = newScore - lastScore
-                        SnakeGame3DView.Grow(diff)
-                    end
-                    lastScore = newScore
-                    ClientState.score = newScore
-                    break
+                local uid = tostring(entry.userId)
+                local score = entry.score or 0
+                
+                -- 获取该蛇的最新服务器坐标数据
+                local serverSnake = snakesData and snakesData[uid]
+                local syncData = { score = score }
+                if serverSnake and serverSnake.body then
+                    syncData.body = serverSnake.body
+                end
+
+                -- 更新 3D 渲染数据
+                SnakeGame3DView.UpdateSnakeData(uid, syncData)
+                
+                if uid == localId then
+                    lastScore = score
+                    ClientState.score = score
                 end
             end
 
@@ -126,9 +168,26 @@ function SnakeGameController:KnitStart()
             SnakeGameUI.Update(ClientState)
         end)
     end
+    
+    -- 每日礼物更新
+    if SnakeGameService.GiftUpdate then
+        SnakeGameService.GiftUpdate:Connect(function(data)
+            ClientState.giftData = data
+            SnakeGameUI.Update(ClientState)
+        end)
+    end
 
     -- 6. 获取初始状态（带重试）
     task.spawn(function()
+        -- 获取礼物数据
+        local successGift, giftData = pcall(function()
+            return SnakeGameService:GetGiftData()
+        end)
+        if successGift and giftData then
+            ClientState.giftData = giftData
+            SnakeGameUI.Update(ClientState)
+        end
+
         for i = 1, 10 do
             local success, state = pcall(function()
                 return SnakeGameService:GetGameState()
@@ -177,10 +236,6 @@ function SnakeGameController:KnitStart()
     local keysPressed = { W = false, A = false, S = false, D = false }
 
     local function sendDirection()
-        -- 如果开启了自动模式，WASD 也会打断自动模式（可选，或者禁止 WASD）
-        -- 这里假设 WASD 优先，如果用户操作，可以暂时覆盖或者不处理
-        -- 目前逻辑：如果 isAutoMode 为 true，WASD 也会发送方向，但 Heartbeat 可能会覆盖它
-        -- 建议：WASD 按下时，自动关闭自动模式
         if isAutoMode then
              isAutoMode = false
              ClientState.autoMode = false
@@ -212,12 +267,9 @@ function SnakeGameController:KnitStart()
         end
 
         if dir.Magnitude > 0.01 then
-            -- 本地立即更新方向（客户端预测）
             SnakeGame3DView.UpdateSnakeDirection(tostring(Players.LocalPlayer.UserId), dir, true)
-            -- 发给服务器
             pcall(function() SnakeGameService:ChangeDirection(dir) end)
         else
-            -- 无按键按下 → 停止移动
             SnakeGame3DView.UpdateSnakeDirection(tostring(Players.LocalPlayer.UserId), Vector3.new(0, 0, 0), false)
             pcall(function() SnakeGameService:ChangeDirection(Vector3.new(0, 0, 0)) end)
         end
@@ -240,8 +292,20 @@ function SnakeGameController:KnitStart()
         end
     end)
 
-    -- 8. 自动寻路 Loop
+    -- 8. 自动寻路 & 计时器 Loop
+    local tickTimer = 0
     RunService.Heartbeat:Connect(function(dt)
+        -- A. 礼物计时器逻辑 (本地预测增加时间，但不刷新 UI，只在服务器信号时更新)
+        if ClientState.giftData then
+            tickTimer = tickTimer + dt
+            if tickTimer >= 1.0 then
+                tickTimer = tickTimer - 1.0
+                ClientState.giftData.timePlayed = (ClientState.giftData.timePlayed or 0) + 1
+                -- 注意：不再每秒刷新 UI，只在服务器 GiftUpdate 信号时更新
+            end
+        end
+
+        -- B. 自动寻路逻辑
         if not isAutoMode or not ClientState.food or #ClientState.food == 0 then return end
 
         autoTimer = autoTimer + dt

@@ -17,19 +17,7 @@ print("[SnakeGameController] 模块加载")
 function SnakeGameController:KnitStart()
     print("[SnakeGameController] KnitStart 开始")
 
-    -- 1. 初始化 UI 和 3D 视图
-    SnakeGameUI.Start()
-    SnakeGame3DView.Init()
-
-    -- 2. 获取客户端服务
-    local SnakeGameService = Knit.GetService("SnakeGameService")
-    if not SnakeGameService then
-        warn("[SnakeGameController] 无法获取 SnakeGameService！")
-        return
-    end
-    print("[SnakeGameController] 已获取 SnakeGameService")
-
-    -- 3. 本地游戏状态
+    -- 1. 定义本地游戏状态 (Before UI Start)
     local ClientState = {
         score = 0,
         money = 0,
@@ -39,7 +27,40 @@ function SnakeGameController:KnitStart()
     }
     local lastScore = 0
 
-    -- 4. 连接服务器信号
+    -- 2. 定义自动寻路逻辑 & 回调 (Before UI Start)
+    local isAutoMode = false
+    local autoTimer = 0
+    local SnakeGameService -- Will be fetched later
+
+    SnakeGameUI.Callbacks.onAutoToggle = function()
+        isAutoMode = not isAutoMode
+        ClientState.autoMode = isAutoMode
+        SnakeGameUI.Update(ClientState)
+        print("[SnakeGameController] 自动模式切换为:", isAutoMode)
+
+        -- 如果关闭自动模式，立即停止移动
+        if not isAutoMode then
+            SnakeGame3DView.UpdateSnakeDirection(tostring(Players.LocalPlayer.UserId), Vector3.new(0, 0, 0), false)
+            if SnakeGameService then
+                pcall(function() SnakeGameService:ChangeDirection(Vector3.new(0, 0, 0)) end)
+            end
+        end
+    end
+
+    -- 3. 初始化 UI 和 3D 视图
+    -- 此时 SnakeGameUI.Callbacks.onAutoToggle 已经定义，SnakeGameUI.Start() 渲染的按钮将带有正确的点击事件
+    SnakeGameUI.Start()
+    SnakeGame3DView.Init()
+
+    -- 4. 获取客户端服务
+    SnakeGameService = Knit.GetService("SnakeGameService")
+    if not SnakeGameService then
+        warn("[SnakeGameController] 无法获取 SnakeGameService！")
+        return
+    end
+    print("[SnakeGameController] 已获取 SnakeGameService")
+
+    -- 5. 连接服务器信号
 
     -- 蛇生成
     if SnakeGameService.SnakeSpawned then
@@ -106,7 +127,7 @@ function SnakeGameController:KnitStart()
         end)
     end
 
-    -- 5. 获取初始状态（带重试）
+    -- 6. 获取初始状态（带重试）
     task.spawn(function()
         for i = 1, 10 do
             local success, state = pcall(function()
@@ -152,10 +173,21 @@ function SnakeGameController:KnitStart()
         end
     end)
 
-    -- 6. WASD 输入处理（相对摄像机方向）
+    -- 7. WASD 输入处理（相对摄像机方向）
     local keysPressed = { W = false, A = false, S = false, D = false }
 
     local function sendDirection()
+        -- 如果开启了自动模式，WASD 也会打断自动模式（可选，或者禁止 WASD）
+        -- 这里假设 WASD 优先，如果用户操作，可以暂时覆盖或者不处理
+        -- 目前逻辑：如果 isAutoMode 为 true，WASD 也会发送方向，但 Heartbeat 可能会覆盖它
+        -- 建议：WASD 按下时，自动关闭自动模式
+        if isAutoMode then
+             isAutoMode = false
+             ClientState.autoMode = false
+             SnakeGameUI.Update(ClientState)
+             print("[SnakeGameController] 用户操作，自动模式关闭")
+        end
+
         local fw, rt = 0, 0
         if keysPressed.W then fw = fw + 1 end
         if keysPressed.S then fw = fw - 1 end
@@ -208,18 +240,7 @@ function SnakeGameController:KnitStart()
         end
     end)
 
-    -- 7. 自动寻路模式
-    local isAutoMode = false
-    local autoTimer = 0
-
-    -- 通过 Callbacks 直接绑定，每次 Roact 重建按钮都读取最新函数
-    SnakeGameUI.Callbacks.onAutoToggle = function()
-        isAutoMode = not isAutoMode
-        ClientState.autoMode = isAutoMode
-        SnakeGameUI.Update(ClientState)
-        print("[SnakeGameController] 自动模式:", isAutoMode)
-    end
-
+    -- 8. 自动寻路 Loop
     RunService.Heartbeat:Connect(function(dt)
         if not isAutoMode or not ClientState.food or #ClientState.food == 0 then return end
 

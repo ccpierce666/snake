@@ -15,12 +15,12 @@ local ringAngleOffset = 0
 local SNAKE_BODY_COLOR = Color3.fromRGB(255, 180, 80)     -- Warm Orange
 local SNAKE_HEAD_COLOR = SNAKE_BODY_COLOR
 local FOOD_COLORS = {
-    Color3.fromRGB(255, 220, 80),    -- Bright Yellow
-    Color3.fromRGB(255, 150, 100),   -- Orange
-    Color3.fromRGB(100, 220, 255),   -- Cyan
-    Color3.fromRGB(100, 200, 100),   -- Green
-    Color3.fromRGB(255, 100, 200),   -- Pink
-    Color3.fromRGB(200, 150, 255),   -- Purple
+    Color3.fromRGB(255, 50, 50),     -- Bright Red
+    Color3.fromRGB(255, 150, 0),     -- Vivid Orange
+    Color3.fromRGB(255, 220, 0),     -- Bright Yellow
+    Color3.fromRGB(0, 180, 255),     -- Sky Blue
+    Color3.fromRGB(160, 50, 255),    -- Vivid Purple
+    Color3.fromRGB(255, 80, 200),    -- Hot Pink
 }
 
 local SNAKE_SPEED = 15
@@ -86,10 +86,8 @@ local function calculateBodySize(currentLength)
 end
 
 local function createEnvironment(parent)
-    local HALF = 120
-    local floorColor  = Color3.fromRGB(144, 218, 144)
-    local wallColor   = Color3.fromRGB(80, 160, 80)
-
+    local HALF = 240 -- Expand to 2x (120 * 2)
+    
     local function makePart(color, size, pos, material)
         local p = Instance.new("Part")
         p.Anchored    = true
@@ -106,17 +104,89 @@ local function createEnvironment(parent)
     end
 
     -- 1. 灰色大底板 (模拟 Baseplate，完全消除 Z-fight)
-    makePart(Color3.fromRGB(150, 150, 150), Vector3.new(2048, 1, 2048), Vector3.new(0, -2, 0), Enum.Material.Plastic)
+    makePart(Color3.fromRGB(150, 150, 150), Vector3.new(2048, 1, 2048), Vector3.new(0, -4, 0), Enum.Material.Plastic)
 
-    -- 2. 绿色游戏区域地面 (抬高，确保覆盖底板)
-    makePart(floorColor, Vector3.new(HALF*2, 1, HALF*2), Vector3.new(0, -0.5, 0))
+    -- 2. 游戏区域地面 (单一大平板 + 网格纹理)
+    -- 使用更鲜亮、对比度更高的绿色 (Bright Lime Green)
+    local floorColor = Color3.fromRGB(80, 230, 80)
+    local floor = makePart(floorColor, Vector3.new(HALF*2, 1, HALF*2), Vector3.new(0, -0.5, 0), Enum.Material.SmoothPlastic)
+    
+    -- 添加网格纹理 (模拟 Baseplate)
+    local texture = Instance.new("Texture")
+    texture.Name = "GridTexture"
+    texture.Texture = "rbxassetid://6372755229" -- Standard Baseplate Grid
+    texture.Face = Enum.NormalId.Top
+    texture.StudsPerTileU = 8 -- 格子大小
+    texture.StudsPerTileV = 8
+    texture.Transparency = 0.7 -- 淡淡的网格
+    texture.Color3 = Color3.fromRGB(0, 60, 0) -- 深绿色网格线，增加层次感
+    texture.Parent = floor
 
-    -- 四面围墙
-    local wH, wT = 6, 2
-    makePart(wallColor, Vector3.new(HALF*2+wT*2, wH, wT), Vector3.new(0, wH/2, -HALF-wT/2))
-    makePart(wallColor, Vector3.new(HALF*2+wT*2, wH, wT), Vector3.new(0, wH/2,  HALF+wT/2))
-    makePart(wallColor, Vector3.new(wT, wH, HALF*2),       Vector3.new(-HALF-wT/2, wH/2, 0))
-    makePart(wallColor, Vector3.new(wT, wH, HALF*2),       Vector3.new( HALF+wT/2, wH/2, 0))
+    -- 3. 围墙 - 优化后的方案
+    -- 方案A: 尝试查找workspace中的hill模型
+    local hillTemplate = Workspace:FindFirstChild("hill")
+    local hillsSuccess = false
+    
+    if hillTemplate and (hillTemplate:IsA("Model") or hillTemplate:IsA("BasePart")) then
+        print("[SnakeGame3D] 找到hill模型，开始生成围墙...")
+        local hillSize = 40 -- Hill模型的大约宽度
+        
+        local function placeHills(startPos, endPos)
+            local vec = endPos - startPos
+            local dist = vec.Magnitude
+            local count = math.ceil(dist / hillSize)
+            local step = vec / count
+            
+            for i = 0, count - 1 do
+                local pos = startPos + step * (i + 0.5)
+                local hill = hillTemplate:Clone()
+                hill.Parent = parent
+                
+                -- 设置位置
+                if hill:IsA("Model") then
+                    hill:PivotTo(CFrame.new(pos))
+                elseif hill:IsA("BasePart") then
+                    hill.Position = pos
+                end
+                
+                -- 随机旋转 (Y轴)
+                local randomY = math.rad(math.random(0, 360))
+                local currentPivot = hill:GetPivot()
+                hill:PivotTo(currentPivot * CFrame.Angles(0, randomY, 0))
+            end
+        end
+        
+        local c1 = Vector3.new(-HALF, 0, -HALF)
+        local c2 = Vector3.new(HALF, 0, -HALF)
+        local c3 = Vector3.new(HALF, 0, HALF)
+        local c4 = Vector3.new(-HALF, 0, HALF)
+        
+        pcall(function()
+            placeHills(c1, c2) -- Top
+            placeHills(c2, c3) -- Right
+            placeHills(c3, c4) -- Bottom
+            placeHills(c4, c1) -- Left
+            hillsSuccess = true
+            print("[SnakeGame3D] Hill模型围墙生成成功!")
+        end)
+    end
+    
+    -- 方案B: 如果Hill模型不存在或生成失败，使用改进的默认围墙
+    if not hillsSuccess then
+        print("[SnakeGame3D] 使用默认围墙方案")
+        -- 使用更加卡通风格的围墙（参考游戏设计标准）
+        local wH = 8 -- 围墙高度
+        local wT = 3 -- 围墙厚度
+        local wallColor = Color3.fromRGB(120, 200, 100) -- 更亮的绿色
+        
+        -- 四条边墙
+        makePart(wallColor, Vector3.new(HALF*2+wT*2, wH, wT), Vector3.new(0, wH/2, -HALF-wT/2), Enum.Material.SmoothPlastic)
+        makePart(wallColor, Vector3.new(HALF*2+wT*2, wH, wT), Vector3.new(0, wH/2,  HALF+wT/2), Enum.Material.SmoothPlastic)
+        makePart(wallColor, Vector3.new(wT, wH, HALF*2),       Vector3.new(-HALF-wT/2, wH/2, 0), Enum.Material.SmoothPlastic)
+        makePart(wallColor, Vector3.new(wT, wH, HALF*2),       Vector3.new( HALF+wT/2, wH/2, 0), Enum.Material.SmoothPlastic)
+        
+        print("[SnakeGame3D] 默认围墙生成完成")
+    end
 end
 
 function SnakeGame3DView.Init()

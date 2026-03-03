@@ -9,6 +9,7 @@ local Knit = require(Common.Knit)
 
 local SnakeGameUI = require(script.Parent.Parent.UI.SnakeGameUI)
 local SnakeGame3DView = require(script.Parent.Parent.UI.SnakeGame3DView)
+local SpinWheelUI = require(script.Parent.Parent.UI.SpinWheelUI)
 
 local SnakeGameController = Knit.CreateController { Name = "SnakeGameController" }
 
@@ -26,6 +27,8 @@ function SnakeGameController:KnitStart()
         autoMode = false,
         giftData = { timePlayed = 0, claimed = {} }, -- 每日礼物数据
         showGiftPanel = false, -- 是否显示礼物面板
+        spins = 0, -- 抽奖次数
+        showSpinPanel = false, -- 是否显示抽奖面板
     }
     local lastScore = 0
 
@@ -52,6 +55,39 @@ function SnakeGameController:KnitStart()
     SnakeGameUI.Callbacks.onToggleGiftPanel = function()
         ClientState.showGiftPanel = not ClientState.showGiftPanel
         SnakeGameUI.Update(ClientState)
+    end
+
+    SnakeGameUI.Callbacks.onToggleSpin = function()
+        print("[SnakeGameController] 切换抽奖面板，当前状态:", ClientState.showSpinPanel)
+        ClientState.showSpinPanel = not ClientState.showSpinPanel
+        print("[SnakeGameController] 新状态:", ClientState.showSpinPanel)
+        SpinWheelUI.Update(ClientState)
+    end
+
+    -- 抽奖相关回调
+    SpinWheelUI.Callbacks.onClose = function()
+        ClientState.showSpinPanel = false
+        SnakeGameUI.Update(ClientState)
+    end
+
+    SpinWheelUI.Callbacks.onSpin = function(callback)
+        if not SnakeGameService then 
+            if callback then callback(false, "Service not ready") end
+            return 
+        end
+        print("[SnakeGameController] 发起抽奖请求")
+        task.spawn(function()
+            local success, reward = pcall(function()
+                return SnakeGameService:Spin()
+            end)
+            if success and reward then
+                print("[Spin] 抽奖成功: " .. tostring(reward.reward))
+                if callback then callback(true, reward) end
+            else
+                warn("[Spin] 抽奖失败: " .. tostring(reward))
+                if callback then callback(false, reward) end
+            end
+        end)
     end
 
     SnakeGameUI.Callbacks.onClaimGift = function(index)
@@ -86,6 +122,7 @@ function SnakeGameController:KnitStart()
     -- 3. 初始化 UI 和 3D 视图
     SnakeGameUI.Start()
     SnakeGame3DView.Init()
+    -- SpinWheelUI 不需要 Start()，它在 Update() 时动态创建
 
     -- 4. 获取客户端服务
     SnakeGameService = Knit.GetService("SnakeGameService")
@@ -176,6 +213,15 @@ function SnakeGameController:KnitStart()
             SnakeGameUI.Update(ClientState)
         end)
     end
+    
+    -- 抽奖次数更新
+    if SnakeGameService.SpinsChanged then
+        SnakeGameService.SpinsChanged:Connect(function(spinsLeft)
+            ClientState.spins = spinsLeft or 0
+            SpinWheelUI.Update(ClientState)
+            print("[SnakeGameController] 抽奖次数已更新: " .. tostring(ClientState.spins))
+        end)
+    end
 
     -- 6. 获取初始状态（带重试）
     task.spawn(function()
@@ -187,6 +233,9 @@ function SnakeGameController:KnitStart()
             ClientState.giftData = giftData
             SnakeGameUI.Update(ClientState)
         end
+
+        -- 获取抽奖次数将通过 SpinsChanged 信号在线获取，初始为 0
+        -- ClientState.spins 初始值已设为 0
 
         for i = 1, 10 do
             local success, state = pcall(function()

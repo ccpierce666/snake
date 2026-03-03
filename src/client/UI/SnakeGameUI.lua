@@ -35,11 +35,11 @@ end
 local function formatNumber(n)
     n = tonumber(n) or 0
     if n >= 1000000 then
-        return string.format("%.1fM", n / 1000000)
+        return string.format("%.3fM", n / 1000000)
     elseif n >= 1000 then
-        return string.format("%.1fK", n / 1000)
+        return string.format("%.3fK", n / 1000)
     else
-        return tostring(math.floor(n))
+        return string.format("%.3f", n)
     end
 end
 
@@ -51,6 +51,40 @@ local function formatTime(seconds)
 end
 
 -- 创建纯文字方形按钮
+local function actionBtn(label, bgColor, props)
+    props = props or {}
+    local children = {
+        UICorner = el("UICorner", { CornerRadius = UDim.new(0.3, 0) }),
+        UIStroke = el("UIStroke", {
+            Color = Color3.fromRGB(0, 0, 50),
+            Thickness = 3,
+            ApplyStrokeMode = Enum.ApplyStrokeMode.Border,
+        }),
+    }
+    
+    if props.Children then
+        for k, v in pairs(props.Children) do children[k] = v end
+    end
+
+    return el("TextButton", {
+        Size = props.Size or UDim2.new(0, 120, 0, 50),
+        Position = props.Position,
+        AnchorPoint = props.AnchorPoint,
+        LayoutOrder = props.LayoutOrder,
+        BackgroundColor3 = bgColor or Color3.fromRGB(255, 180, 50),
+        BorderSizePixel = 0,
+        Text = label,
+        TextColor3 = Color3.new(1, 1, 1),
+        Font = Enum.Font.FredokaOne,
+        TextSize = props.TextSize or 28,
+        TextStrokeTransparency = 0,
+        TextStrokeColor3 = Color3.new(0,0,0),
+        Name = props.Name or label,
+        MouseButton1Click = props.onActivated,
+        AutoButtonColor = true,
+    }, children)
+end
+
 local function menuBtn(label, bgColor, props)
     props = props or {}
     local children = {
@@ -337,39 +371,85 @@ function SnakeGameUIRoot:render()
         BackgroundTransparency = 1,
     }, {
         UIListLayout = el("UIListLayout", {
-            Padding = UDim.new(0, 10),
+            Padding = UDim.new(0, 15),
             SortOrder = Enum.SortOrder.LayoutOrder,
             HorizontalAlignment = Enum.HorizontalAlignment.Left,
         }),
-        ScoreBar = Roui.StatBar({
-            BackgroundColor3 = Color3.fromRGB(160, 100, 240),
-            Icon = "S",
-            Value = formatNumber(score),
-            LayoutOrder = 1,
-        }),
-        MoneyBar = Roui.StatBar({
-            BackgroundColor3 = Color3.fromRGB(100, 220, 100),
-            Icon = "$",
-            Value = formatNumber(money),
-            LayoutOrder = 2,
-        }),
-        MenuGrid = el("Frame", {
-            Size = UDim2.new(0, 180, 0, 180),
+        
+        -- Stats Container (Score + Money)
+        StatsContainer = el("Frame", {
+            Size = UDim2.new(0, 260, 0, 110),
             BackgroundTransparency = 1,
-            LayoutOrder = 3,
+            LayoutOrder = 1,
+        }, {
+            UIListLayout = el("UIListLayout", {
+                Padding = UDim.new(0, 8),
+                SortOrder = Enum.SortOrder.LayoutOrder,
+            }),
+            ScoreBar = Roui.StatBar({
+                BackgroundColor3 = Color3.fromRGB(60, 160, 255), -- Blue
+                Icon = "rbxassetid://89074978607958", -- Snake Icon
+                Value = formatNumber(score),
+                LayoutOrder = 1,
+            }),
+            MoneyBar = Roui.StatBar({
+                BackgroundColor3 = Color3.fromRGB(80, 220, 80), -- Green
+                Icon = "rbxassetid://105300168575798", -- Cash Stack
+                Value = formatNumber(money),
+                LayoutOrder = 2,
+            }),
+        }),
+
+        -- Menu Buttons Grid
+        MenuGrid = el("Frame", {
+            Size = UDim2.new(0, 160, 0, 240), -- 2 columns x 80px width
+            BackgroundTransparency = 1,
+            LayoutOrder = 2,
         }, {
             UIGridLayout = el("UIGridLayout", {
-                CellSize = UDim2.new(0, 80, 0, 80),
+                CellSize = UDim2.new(0, 70, 0, 70),
                 CellPadding = UDim2.new(0, 10, 0, 10),
+                SortOrder = Enum.SortOrder.LayoutOrder,
             }),
-            ShopBtn  = menuBtn("商店", Color3.fromRGB(255, 180, 50),  { Name = "ShopButton", Icon = "rbxassetid://6034509993" }),
-            SkinBtn  = menuBtn("皮肤", Color3.fromRGB(100, 200, 255), { Name = "SkinButton", Icon = "rbxassetid://6034817279" }),
-            SpinBtn  = menuBtn("旋转", Color3.fromRGB(180, 100, 240), { Name = "SpinButton", Icon = "rbxassetid://6034706260" }),
-            DailyBtn = menuBtn("每日", Color3.fromRGB(100, 180, 240), { 
+            DailyBtn = menuBtn("Daily", Color3.fromRGB(247, 55, 92), { 
                 Name = "DailyButton", 
-                Icon = "rbxassetid://6034261141",
-                onActivated = SnakeGameUI.Callbacks.onToggleGiftPanel 
+                Icon = "rbxassetid://71479056537473", -- Daily Calendar
+                onActivated = SnakeGameUI.Callbacks.onToggleGiftPanel,
+                LayoutOrder = 1
             }),
+            ShopBtn  = menuBtn("Shop", Color3.fromRGB(255, 180, 50),  { 
+                Name = "ShopButton", 
+                Icon = "rbxassetid://118554800883386", -- Store
+                LayoutOrder = 2 
+            }),
+            SkinsBtn  = menuBtn("Skins", Color3.fromRGB(228, 139, 68), { 
+                Name = "SkinButton", 
+                Icon = "rbxassetid://94001317361506", -- Inventory/Skins Box
+                LayoutOrder = 3
+            }),
+            SpinBtn  = menuBtn("Spin", Color3.fromRGB(98, 185, 221), { 
+                Name = "SpinButton", 
+                Icon = "rbxassetid://6035067836", -- Wheel
+                onActivated = SnakeGameUI.Callbacks.onToggleSpin,
+                LayoutOrder = 4
+            }),
+            -- Level Badge placeholder (if needed)
+            LevelBadge = el("Frame", {
+                BackgroundColor3 = Color3.fromRGB(255, 200, 50),
+                LayoutOrder = 5,
+            }, {
+                 UICorner = el("UICorner", { CornerRadius = UDim.new(1, 0) }), -- Circle/Badge
+                 UIStroke = el("UIStroke", { Thickness = 3, Color = Color3.new(0,0,0) }),
+                 LevelText = el("TextLabel", {
+                     Size = UDim2.new(1,0,1,0),
+                     BackgroundTransparency = 1,
+                     Text = "4", -- Placeholder
+                     Font = Enum.Font.FredokaOne,
+                     TextSize = 24,
+                     TextColor3 = Color3.new(1,1,1),
+                     TextStrokeTransparency = 0,
+                 }),
+            })
         }),
     })
 
@@ -389,24 +469,45 @@ function SnakeGameUIRoot:render()
     children.BottomBar = el("Frame", {
         Position = UDim2.new(0.5, 0, 1, -110),
         AnchorPoint = Vector2.new(0.5, 0.5),
-        Size = UDim2.new(0, 380, 0, 90),
+        Size = UDim2.new(0, 600, 0, 80), -- Increased width for action buttons
         BackgroundTransparency = 1,
     }, {
         UIListLayout = el("UIListLayout", {
             FillDirection = Enum.FillDirection.Horizontal,
             HorizontalAlignment = Enum.HorizontalAlignment.Center,
             VerticalAlignment = Enum.VerticalAlignment.Center,
-            Padding = UDim.new(0, 10),
+            Padding = UDim.new(0, 15), -- More spacing
             SortOrder = Enum.SortOrder.LayoutOrder,
         }),
-        BoostBtn  = menuBtn("加速", Color3.fromRGB(80, 200, 120),  { Name = "BoostButton",  Size = UDim2.new(0, 80, 0, 80), LayoutOrder = 1, Icon = "rbxassetid://6035288286" }),
-        BombBtn   = menuBtn("核弹", Color3.fromRGB(255, 80, 80),   { Name = "BombButton",   Size = UDim2.new(0, 80, 0, 80), LayoutOrder = 2, Icon = "rbxassetid://6034309323" }),
-        MagnetBtn = menuBtn("磁铁", Color3.fromRGB(100, 150, 255), { Name = "MagnetButton", Size = UDim2.new(0, 80, 0, 80), LayoutOrder = 3, Icon = "rbxassetid://6034633237" }),
-        AutoBtn   = menuBtn(
-            autoMode and "停止" or "自动",
-            autoMode and Color3.fromRGB(220, 80, 80) or Color3.fromRGB(60, 180, 100),
-            { Name = "AutoButton", Size = UDim2.new(0, 80, 0, 80), LayoutOrder = 4, Icon = "rbxassetid://6034287959",
-              onActivated = SnakeGameUI.Callbacks.onAutoToggle }
+        -- Button 1: 2x Speed (Boost) - Yellow
+        BoostBtn = actionBtn("2x Speed", Color3.fromRGB(255, 200, 0), { 
+            Name = "BoostButton",  
+            LayoutOrder = 1, 
+            onActivated = nil -- Add boost callback if available
+        }),
+        -- Button 2: Kill All (Bomb) - Red, Larger
+        BombBtn = actionBtn("Kill All", Color3.fromRGB(255, 40, 40), { 
+            Name = "BombButton",   
+            Size = UDim2.new(0, 150, 0, 60), -- Larger
+            TextSize = 34,
+            LayoutOrder = 2, 
+            onActivated = nil -- Add bomb callback if available
+        }),
+        -- Button 3: Magnet (Styled like 2x Size) - Blue
+        MagnetBtn = actionBtn("Magnet", Color3.fromRGB(40, 160, 255), { 
+            Name = "MagnetButton", 
+            LayoutOrder = 3, 
+            onActivated = nil -- Add magnet callback if available
+        }),
+        -- Button 4: Auto - Green/Red
+        AutoBtn = actionBtn(
+            autoMode and "Stop" or "Auto",
+            autoMode and Color3.fromRGB(220, 80, 80) or Color3.fromRGB(80, 220, 80),
+            { 
+                Name = "AutoButton", 
+                LayoutOrder = 4, 
+                onActivated = SnakeGameUI.Callbacks.onAutoToggle 
+            }
         ),
     })
 

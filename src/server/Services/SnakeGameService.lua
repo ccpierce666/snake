@@ -6,7 +6,7 @@ local DataStoreService = game:GetService("DataStoreService")
 print("[SnakeGameService] 模块加载")
 
 -- 配置参数
-local GAME_AREA_SIZE = 120
+local GAME_AREA_SIZE = 240
 local INITIAL_LENGTH = 2      -- 头+尾
 local SNAKE_SPEED = 15
 local GAME_TICK = 1/60
@@ -27,6 +27,7 @@ local MoneyChangedSignal = Knit.CreateSignal()
 local SnakeSpawnedSignal = Knit.CreateSignal()
 local SnakeDiedSignal = Knit.CreateSignal()
 local GiftUpdateSignal = Knit.CreateSignal()
+local SpinsChangedSignal = Knit.CreateSignal()  -- 抽奖次数更新信号
 
 local SnakeGameService = Knit.CreateService {
     Name = "SnakeGameService",
@@ -38,6 +39,7 @@ local SnakeGameService = Knit.CreateService {
         SnakeSpawned = SnakeSpawnedSignal,
         SnakeDied = SnakeDiedSignal,
         GiftUpdate = GiftUpdateSignal,
+        SpinsChanged = SpinsChangedSignal,
     },
 }
 
@@ -63,6 +65,18 @@ local GIFT_REWARDS = {
     { time = 3000, type = "Length", amount = 100000 },
     { time = 4200, type = "Length", amount = 250000 },
     { time = 5400, type = "Length", amount = 1000000 },
+}
+
+-- 抽奖轮盘配置 (8个奖项，对应图片顺时针顺序)
+local SPIN_WHEEL = {
+    { id=1, reward = "2K Length",   type="Length", amount=2000,    probability = 0.35 }, -- Red
+    { id=2, reward = "x100 Special",type="Spin",   amount=100,     probability = 0.01 }, -- Black (假设是100次抽奖或特殊奖励)
+    { id=3, reward = "50K Length",  type="Length", amount=50000,   probability = 0.05 }, -- Purple
+    { id=4, reward = "5K Length",   type="Length", amount=5000,    probability = 0.15 }, -- Dark Purple
+    { id=5, reward = "25K Length",  type="Length", amount=25000,   probability = 0.15 }, -- Blue
+    { id=6, reward = "100K Length", type="Length", amount=100000,  probability = 0.02 }, -- Cyan
+    { id=7, reward = "10K Length",  type="Length", amount=10000,   probability = 0.15 }, -- Green
+    { id=8, reward = "1M Length",   type="Length", amount=1000000, probability = 0.005 }, -- Orange
 }
 
 local FOOD_GROWTH_MAP = {
@@ -206,6 +220,53 @@ function SnakeGameService:RequestRespawn(player)
     SnakeSpawnedSignal:Fire(player.UserId, body, Color3.new(math.random(), math.random(), math.random()))
 end
 
+-- 抽奖功能
+function SnakeGameService:Spin(player)
+    local uid = tostring(player.UserId)
+    local spins = playerSpins[uid] or 0
+    
+    if spins <= 0 then
+        return false, "No spins"
+    end
+    
+    -- 扣除一次抽奖次数
+    playerSpins[uid] = spins - 1
+    saveSpins(player.UserId)
+    
+    -- 通知客户端抽奖次数更新
+    SpinsChangedSignal:FireTo(player, playerSpins[uid])
+    
+    -- 根据概率随机抽奖
+    local rand = math.random()
+    local accumulated = 0
+    local selectedReward = nil
+    
+    for _, reward in ipairs(SPIN_WHEEL) do
+        accumulated = accumulated + reward.probability
+        if rand <= accumulated then
+            selectedReward = reward
+            break
+        end
+    end
+    
+    if not selectedReward then
+        selectedReward = SPIN_WHEEL[1]  -- 默认为第一个
+    end
+    
+    -- 发放奖励
+    if selectedReward.type == "Length" then
+        self:AddSnakeLength(player.UserId, selectedReward.amount)
+    elseif selectedReward.type == "Spin" then
+        playerSpins[uid] = (playerSpins[uid] or 0) + selectedReward.amount
+        saveSpins(player.UserId)
+    end
+    
+    print(string.format("[Spin] 玩家 %s 抽到: %s, 剩余抽奖: %d", 
+        player.Name, selectedReward.reward, playerSpins[uid]))
+    
+    return true, selectedReward
+end
+
 function SnakeGameService:GetGameState()
     local state = { snakes = {}, food = food, leaderboard = getLeaderboard() }
     for uid, s in pairs(snakes) do
@@ -223,6 +284,8 @@ end
 
 function SnakeGameService.Client:ClaimGift(player, index) return self.Server:ClaimGift(player, index) end
 function SnakeGameService.Client:GetGiftData(player) return playerDailyGifts[tostring(player.UserId)] or loadGiftData(player.UserId) end
+function SnakeGameService.Client:Spin(player) return self.Server:Spin(player) end
+function SnakeGameService.Client:GetSpins(player) return playerSpins[tostring(player.UserId)] or 0 end
 function SnakeGameService.Client:GetGameState(p) return self.Server:GetGameState() end
 function SnakeGameService.Client:ChangeDirection(p, d) self.Server:ChangeDirection(p, d) end
 function SnakeGameService.Client:RequestRespawn(p) self.Server:RequestRespawn(p) end
@@ -232,7 +295,7 @@ function SnakeGameService.Client:RequestRespawn(p) self.Server:RequestRespawn(p)
 -------------------------------------------------------------------------------
 
 local function spawnFood()
-    local pos = Vector3.new((math.random()*2-1)*110, 0, (math.random()*2-1)*110)
+    local pos = Vector3.new((math.random()*2-1)*220, 0, (math.random()*2-1)*220)
     local rand = math.random()
     local val = 1
     if rand < 0.01 then val = 11 elseif rand < 0.05 then val = 8 elseif rand < 0.2 then val = 4 end
@@ -248,7 +311,7 @@ local function moveSnakes()
             local nextHead = head + s.targetDirection * SNAKE_SPEED * GAME_TICK
             
             -- 边界限制
-            nextHead = Vector3.new(math.clamp(nextHead.X, -119, 119), 0, math.clamp(nextHead.Z, -119, 119))
+            nextHead = Vector3.new(math.clamp(nextHead.X, -239, 239), 0, math.clamp(nextHead.Z, -239, 239))
             table.insert(s.body, 1, nextHead)
             
             -- 食物检测

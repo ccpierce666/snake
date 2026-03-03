@@ -3,6 +3,19 @@ local Roact = {}
 Roact.Component = {}
 Roact.Component.__index = Roact.Component
 
+-- Ref support
+Roact.Ref = "Ref"
+
+function Roact.createRef()
+    local ref = {
+        current = nil
+    }
+    function ref:getValue()
+        return self.current
+    end
+    return ref
+end
+
 -- Event mapping support
 Roact.Event = setmetatable({}, {
     __index = function(_, key) return key end
@@ -82,7 +95,14 @@ function Roact.mount(element, parent, key)
         
         -- Set properties and events
         for prop, value in pairs(element._props) do
-            if prop:sub(1, 1) ~= "_" then
+            if prop == Roact.Ref then
+                -- Handle Ref
+                if type(value) == "table" then
+                    value.current = instance
+                elseif type(value) == "function" then
+                    value(instance)
+                end
+            elseif prop:sub(1, 1) ~= "_" then
                 local isEvent = false
                 
                 -- Detect and connect events

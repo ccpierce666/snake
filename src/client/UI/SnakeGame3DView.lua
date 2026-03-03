@@ -70,18 +70,18 @@ end
 
 local function calculateBodySize(currentLength)
     -- 对应 UPDATE_LOG.md 的四个阶段
-    if currentLength < 10000 then
-        -- 早期: 0.6 (最小码) -> 1.5 (极慢增长)
-        return 0.6 + (currentLength / 10000) * 0.9
-    elseif currentLength < 100000 then
-        -- 中期: 1.5 -> 3.0 (逐步加速)
-        return 1.5 + ((currentLength - 10000) / 90000) * 1.5
-    elseif currentLength < 500000 then
-        -- 后期: 3.0 -> 8.0 (快速膨胀)
-        return 3.0 + ((currentLength - 100000) / 400000) * 5.0
+    if currentLength < 100 then
+        -- 0-100: 3x growth (0.6 -> 1.8)
+        return 0.6 + (currentLength / 100) * 1.2
+    elseif currentLength < 1000 then
+        -- 100-1000: 2x growth (1.8 -> 3.6)
+        return 1.8 + ((currentLength - 100) / 900) * 1.8
+    elseif currentLength < 10000 then
+        -- 1000-10000: Slow growth (3.6 -> 6.0)
+        return 3.6 + ((currentLength - 1000) / 9000) * 2.4
     else
-        -- 超期: 8.0 固定 (身体不变大)
-        return 8.0
+        -- 10000+: Cap at 8.0
+        return math.min(8.0, 6.0 + ((currentLength - 10000) / 90000) * 2.0)
     end
 end
 
@@ -122,71 +122,98 @@ local function createEnvironment(parent)
     texture.Color3 = Color3.fromRGB(0, 60, 0) -- 深绿色网格线，增加层次感
     texture.Parent = floor
 
-    -- 3. 围墙 - 优化后的方案
-    -- 方案A: 尝试查找workspace中的hill模型
-    local hillTemplate = Workspace:FindFirstChild("hill")
-    local hillsSuccess = false
-    
-    if hillTemplate and (hillTemplate:IsA("Model") or hillTemplate:IsA("BasePart")) then
-        print("[SnakeGame3D] 找到hill模型，开始生成围墙...")
-        local hillSize = 40 -- Hill模型的大约宽度
+    -- 3. 围墙 - Low Poly 风格生成
+    local function createLowPolyWallSegment(pos, angle, size)
+        local segment = Instance.new("Model")
+        segment.Name = "WallSegment"
+        segment.Parent = parent
         
-        local function placeHills(startPos, endPos)
-            local vec = endPos - startPos
-            local dist = vec.Magnitude
-            local count = math.ceil(dist / hillSize)
-            local step = vec / count
-            
-            for i = 0, count - 1 do
-                local pos = startPos + step * (i + 0.5)
-                local hill = hillTemplate:Clone()
-                hill.Parent = parent
-                
-                -- 设置位置
-                if hill:IsA("Model") then
-                    hill:PivotTo(CFrame.new(pos))
-                elseif hill:IsA("BasePart") then
-                    hill.Position = pos
-                end
-                
-                -- 随机旋转 (Y轴)
-                local randomY = math.rad(math.random(0, 360))
-                local currentPivot = hill:GetPivot()
-                hill:PivotTo(currentPivot * CFrame.Angles(0, randomY, 0))
-            end
+        -- 随机参数
+        local height = 15 + math.random() * 5 -- 高度 15-20
+        local width = size * 1.2 -- 宽度稍微重叠
+        local depth = 8 + math.random() * 4 -- 厚度
+        
+        -- 颜色
+        local cliffColor = Color3.fromRGB(180, 110, 60) -- Lighter Brown/Earth
+        local grassColor = Color3.fromRGB(100, 240, 100) -- Bright Green
+        
+        -- 主体 (楔形) - 模拟山坡
+        local basePart = Instance.new("Part")
+        basePart.Name = "Base"
+        basePart.Shape = Enum.PartType.Block -- 使用 Block 并旋转来模拟不规则
+        basePart.Size = Vector3.new(width, height, depth)
+        basePart.Color = cliffColor
+        basePart.Material = Enum.Material.Plastic
+        basePart.Anchored = true
+        basePart.CanCollide = true
+        basePart.Parent = segment
+        
+        -- 旋转和定位
+        -- 基础位置向上偏移一半高度
+        local cf = CFrame.new(pos) * CFrame.Angles(0, angle, 0) * CFrame.new(0, height/2 - 2, 0)
+        
+        -- 随机倾斜，制造不规则感
+        local tiltX = math.rad(math.random(-5, 5))
+        local tiltZ = math.rad(math.random(-5, 5))
+        
+        basePart.CFrame = cf * CFrame.Angles(tiltX, 0, tiltZ)
+        
+        -- 顶部草皮 (覆盖在上面)
+        local topPart = Instance.new("Part")
+        topPart.Name = "GrassTop"
+        topPart.Size = Vector3.new(width * 1.1, 2, depth * 1.1)
+        topPart.Color = grassColor
+        topPart.Material = Enum.Material.SmoothPlastic
+        topPart.Anchored = true
+        topPart.CanCollide = false
+        topPart.Parent = segment
+        topPart.CFrame = basePart.CFrame * CFrame.new(0, height/2, 0)
+        
+        -- 额外的装饰石块 (偶发)
+        if math.random() < 0.3 then
+            local rock = Instance.new("Part")
+            rock.Size = Vector3.new(4, 4, 4)
+            rock.Shape = Enum.PartType.Ball
+            rock.Color = Color3.fromRGB(100, 100, 100)
+            rock.Material = Enum.Material.Slate
+            rock.Anchored = true
+            rock.CanCollide = false
+            rock.Parent = segment
+            rock.CFrame = cf * CFrame.new(math.random(-5,5), -height/3, depth/2 + 1)
         end
+    end
+
+    local function placeWalls(startPos, endPos)
+        local vec = endPos - startPos
+        local dist = vec.Magnitude
+        local segmentSize = 15 -- 每段长度
+        local count = math.ceil(dist / segmentSize)
+        local step = vec / count
         
-        local c1 = Vector3.new(-HALF, 0, -HALF)
-        local c2 = Vector3.new(HALF, 0, -HALF)
-        local c3 = Vector3.new(HALF, 0, HALF)
-        local c4 = Vector3.new(-HALF, 0, HALF)
+        -- 计算墙壁朝向的角度
+        local angle = math.atan2(vec.X, vec.Z) + math.pi/2 
         
-        pcall(function()
-            placeHills(c1, c2) -- Top
-            placeHills(c2, c3) -- Right
-            placeHills(c3, c4) -- Bottom
-            placeHills(c4, c1) -- Left
-            hillsSuccess = true
-            print("[SnakeGame3D] Hill模型围墙生成成功!")
-        end)
+        for i = 0, count - 1 do
+            local pos = startPos + step * (i + 0.5)
+            createLowPolyWallSegment(pos, angle, segmentSize)
+        end
     end
     
-    -- 方案B: 如果Hill模型不存在或生成失败，使用改进的默认围墙
-    if not hillsSuccess then
-        print("[SnakeGame3D] 使用默认围墙方案")
-        -- 使用更加卡通风格的围墙（参考游戏设计标准）
-        local wH = 8 -- 围墙高度
-        local wT = 3 -- 围墙厚度
-        local wallColor = Color3.fromRGB(120, 200, 100) -- 更亮的绿色
-        
-        -- 四条边墙
-        makePart(wallColor, Vector3.new(HALF*2+wT*2, wH, wT), Vector3.new(0, wH/2, -HALF-wT/2), Enum.Material.SmoothPlastic)
-        makePart(wallColor, Vector3.new(HALF*2+wT*2, wH, wT), Vector3.new(0, wH/2,  HALF+wT/2), Enum.Material.SmoothPlastic)
-        makePart(wallColor, Vector3.new(wT, wH, HALF*2),       Vector3.new(-HALF-wT/2, wH/2, 0), Enum.Material.SmoothPlastic)
-        makePart(wallColor, Vector3.new(wT, wH, HALF*2),       Vector3.new( HALF+wT/2, wH/2, 0), Enum.Material.SmoothPlastic)
-        
-        print("[SnakeGame3D] 默认围墙生成完成")
-    end
+    -- 边界坐标
+    local c1 = Vector3.new(-HALF, 0, -HALF)
+    local c2 = Vector3.new(HALF, 0, -HALF)
+    local c3 = Vector3.new(HALF, 0, HALF)
+    local c4 = Vector3.new(-HALF, 0, HALF)
+    
+    -- 稍微向外偏移一点，避免遮挡游戏区域边缘
+    local offset = 5
+    
+    placeWalls(c1 + Vector3.new(0,0,-offset), c2 + Vector3.new(0,0,-offset)) -- Top
+    placeWalls(c2 + Vector3.new(offset,0,0), c3 + Vector3.new(offset,0,0)) -- Right
+    placeWalls(c3 + Vector3.new(0,0,offset), c4 + Vector3.new(0,0,offset)) -- Bottom
+    placeWalls(c4 + Vector3.new(-offset,0,0), c1 + Vector3.new(-offset,0,0)) -- Left
+    
+    print("[SnakeGame3D] Low Poly 围墙生成完成")
 end
 
 function SnakeGame3DView.Init()
@@ -277,6 +304,12 @@ function SnakeGame3DView.Init()
 
         local function addSnakeRenderPoints(body, isLocal, bodySize)
             if not body or #body == 0 then return end
+
+            -- 客户端强制边界限制 (视觉修正，防止穿墙)
+            -- 围墙位置 240, 头部半径 bodySize * 0.75
+            local visualRadius = bodySize * 0.75
+            local limit = 240 - visualRadius - 0.2 -- 与服务器逻辑对齐 (留 0.2 缓冲)
+            body[1] = Vector3.new(math.clamp(body[1].X, -limit, limit), 0, math.clamp(body[1].Z, -limit, limit))
 
             local spacing = bodySize * 0.6
 
@@ -456,17 +489,17 @@ function SnakeGame3DView.UpdateFood(foodList)
         local size = 1.0
         local color = FOOD_COLORS[1]
 
-        if value == 11 then size = 4.2; color = Color3.fromRGB(255, 0, 255)
-        elseif value == 10 then size = 4.0; color = Color3.fromRGB(200, 0, 255)
-        elseif value == 9 then size = 3.8; color = Color3.fromRGB(100, 0, 255)
-        elseif value == 8 then size = 3.5; color = Color3.fromRGB(0, 100, 255)
-        elseif value == 7 then size = 3.2; color = Color3.fromRGB(0, 200, 255)
-        elseif value == 6 then size = 2.8; color = Color3.fromRGB(255, 0, 0)
-        elseif value == 5 then size = 2.4; color = Color3.fromRGB(255, 100, 0)
-        elseif value == 4 then size = 2.0; color = Color3.fromRGB(255, 200, 0)
-        elseif value == 3 then size = 1.5; color = Color3.fromRGB(255, 255, 0)
-        elseif value == 2 then size = 1.2; color = Color3.fromRGB(150, 255, 100)
-        else size = 1.0; color = Color3.fromRGB(100, 255, 100)
+        if value == 11 then size = 2.5; color = Color3.fromRGB(255, 0, 255)
+        elseif value == 10 then size = 2.4; color = Color3.fromRGB(200, 0, 255)
+        elseif value == 9 then size = 2.3; color = Color3.fromRGB(100, 0, 255)
+        elseif value == 8 then size = 2.1; color = Color3.fromRGB(0, 100, 255)
+        elseif value == 7 then size = 1.9; color = Color3.fromRGB(255, 0, 0) -- Level 7 now Red
+        elseif value == 6 then size = 1.7; color = Color3.fromRGB(0, 200, 255) -- Level 6 now Light Blue
+        elseif value == 5 then size = 1.5; color = Color3.fromRGB(255, 100, 0)
+        elseif value == 4 then size = 1.2; color = Color3.fromRGB(255, 200, 0)
+        elseif value == 3 then size = 0.9; color = Color3.fromRGB(255, 255, 0)
+        elseif value == 2 then size = 0.7; color = Color3.fromRGB(255, 150, 200) -- Pink
+        else size = 0.6; color = Color3.fromRGB(255, 255, 255) -- White
         end
 
         if not part then

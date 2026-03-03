@@ -350,7 +350,8 @@ function SnakeGameController:KnitStart()
             if tickTimer >= 1.0 then
                 tickTimer = tickTimer - 1.0
                 ClientState.giftData.timePlayed = (ClientState.giftData.timePlayed or 0) + 1
-                -- 注意：不再每秒刷新 UI，只在服务器 GiftUpdate 信号时更新
+                -- 每秒刷新 UI 以更新倒计时
+                SnakeGameUI.Update(ClientState)
             end
         end
 

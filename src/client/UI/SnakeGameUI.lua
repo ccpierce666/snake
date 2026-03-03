@@ -34,12 +34,16 @@ end
 
 local function formatNumber(n)
     n = tonumber(n) or 0
-    if n >= 1000000 then
+    if n >= 1000000000000 then
+        return string.format("%.3fT", n / 1000000000000)
+    elseif n >= 1000000000 then
+        return string.format("%.3fB", n / 1000000000)
+    elseif n >= 1000000 then
         return string.format("%.3fM", n / 1000000)
     elseif n >= 1000 then
         return string.format("%.3fK", n / 1000)
     else
-        return string.format("%.3f", n)
+        return tostring(math.floor(n))
     end
 end
 
@@ -243,7 +247,7 @@ local function GiftPanel(props)
             statusColor = Color3.fromRGB(60, 220, 60)
         end
         
-        local iconId = (reward.type == "Length") and "rbxassetid://6034509993" or "rbxassetid://6034706260"
+        local iconId = (reward.type == "Length") and "rbxassetid://89074978607958" or "rbxassetid://6034706260"
         
         listItems["Item"..i] = el("Frame", {
             BackgroundColor3 = itemBgColor,
@@ -378,12 +382,12 @@ function SnakeGameUIRoot:render()
         
         -- Stats Container (Score + Money)
         StatsContainer = el("Frame", {
-            Size = UDim2.new(0, 260, 0, 110),
+            Size = UDim2.new(0, 260, 0, 130), -- Increased height to avoid overlap
             BackgroundTransparency = 1,
             LayoutOrder = 1,
         }, {
             UIListLayout = el("UIListLayout", {
-                Padding = UDim.new(0, 8),
+                Padding = UDim.new(0, 15), -- Increased padding
                 SortOrder = Enum.SortOrder.LayoutOrder,
             }),
             ScoreBar = Roui.StatBar({
@@ -427,29 +431,6 @@ function SnakeGameUIRoot:render()
                 Icon = "rbxassetid://94001317361506", -- Inventory/Skins Box
                 LayoutOrder = 3
             }),
-            SpinBtn  = menuBtn("Spin", Color3.fromRGB(98, 185, 221), { 
-                Name = "SpinButton", 
-                Icon = "rbxassetid://6035067836", -- Wheel
-                onActivated = SnakeGameUI.Callbacks.onToggleSpin,
-                LayoutOrder = 4
-            }),
-            -- Level Badge placeholder (if needed)
-            LevelBadge = el("Frame", {
-                BackgroundColor3 = Color3.fromRGB(255, 200, 50),
-                LayoutOrder = 5,
-            }, {
-                 UICorner = el("UICorner", { CornerRadius = UDim.new(1, 0) }), -- Circle/Badge
-                 UIStroke = el("UIStroke", { Thickness = 3, Color = Color3.new(0,0,0) }),
-                 LevelText = el("TextLabel", {
-                     Size = UDim2.new(1,0,1,0),
-                     BackgroundTransparency = 1,
-                     Text = "4", -- Placeholder
-                     Font = Enum.Font.FredokaOne,
-                     TextSize = 24,
-                     TextColor3 = Color3.new(1,1,1),
-                     TextStrokeTransparency = 0,
-                 }),
-            })
         }),
     })
 

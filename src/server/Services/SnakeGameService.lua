@@ -48,6 +48,8 @@ local SnakeGameService = Knit.CreateService {
 local snakes = {}
 local food = {}
 local nextFoodId = 1
+local leaderboardUpdateCounter = 0
+local LEADERBOARD_UPDATE_INTERVAL = 3 -- 每3帧更新一次排行榜
 local playerMoney = {}
 local playerSpins = {}
 local playerDailyGifts = {}
@@ -346,7 +348,8 @@ function SnakeGameService:GetGameState()
     for uid, s in pairs(snakes) do
         state.snakes[tostring(uid)] = {
             body = s.body, direction = s.direction, isMoving = s.isMoving,
-            score = s.score, alive = s.alive
+            score = s.score, alive = s.alive,
+            displayLength = s.displayLength or #s.body  -- 身体放大倍数数据
         }
     end
     return state
@@ -438,6 +441,19 @@ local function spawnFood()
     FoodChangedSignal:Fire(food)
 end
 
+-- 私有函数：获取游戏状态（供 moveSnakes 使用）
+local function getGameStatePrivate()
+    local state = { snakes = {}, food = food, leaderboard = getLeaderboard() }
+    for uid, s in pairs(snakes) do
+        state.snakes[tostring(uid)] = {
+            body = s.body, direction = s.direction, isMoving = s.isMoving,
+            score = s.score, alive = s.alive,
+            displayLength = s.displayLength or #s.body  -- 身体放大倍数数据
+        }
+    end
+    return state
+end
+
 local function moveSnakes()
     for pid, s in pairs(snakes) do
         if s.alive and s.isMoving then
@@ -461,6 +477,7 @@ local function moveSnakes()
             local radius = calculateSnakeRadius(s.score)
             local pickupRange = 6 + radius
             
+            local foodEaten = false
             for i = #food, 1, -1 do
                 local f = food[i]
                 local dist = (nextHead - f.pos).Magnitude
@@ -478,7 +495,82 @@ local function moveSnakes()
                     end
                     
                     table.remove(food, i)
-                    FoodChangedSignal:Fire(food)
+                    foodEaten = true
+                end
+            end
+            
+            -- 如果吃了食物，更新排行榜
+            if foodEaten then
+                FoodChangedSignal:Fire(food)
+                local state = getGameStatePrivate()
+                LeaderboardChangedSignal:Fire(state.leaderboard, state.snakes)
+            end
+            
+            -- 蛇与蛇碰撞检测
+            for otherPid, otherSnake in pairs(snakes) do
+                if otherPid ~= pid and otherSnake.alive then
+                    local otherScore = otherSnake.score or 0
+                    local currentScore = s.score or 0
+                    local otherHeadRadius = calculateSnakeRadius(otherScore)
+                    local collisionDistance = radius + otherHeadRadius
+                    
+                    -- 检测当前蛇的头部与其他蛇的身体碰撞
+                    for bodyIdx, bodySegment in ipairs(otherSnake.body) do
+                        -- 跳过对方的头部（头部碰撞不算）
+                        if bodyIdx > 1 then
+                            local dist = (nextHead - bodySegment).Magnitude
+                            if dist < collisionDistance then
+                                -- 比较大小：只有小的蛇会死亡
+                                if otherScore > currentScore then
+                                    -- 对方更大，当前蛇死亡
+                                    local lostLength = s.displayLength or #s.body
+                                    s.alive = false
+                                    
+                                    -- 获取杀手信息
+                                    local killerPlayer = Players:GetPlayerByUserId(tonumber(otherPid))
+                                    local killerName = killerPlayer and killerPlayer.Name or "Unknown"
+                                    local victim = Players:GetPlayerByUserId(tonumber(pid))
+                                    
+                                    -- 通知受害者客户端
+                                    if victim then
+                                        SnakeDiedSignal:FireTo(victim, {
+                                            killedBy = killerName,
+                                            lostSize = lostLength,
+                                        })
+                                        print("[SnakeGameService] Player " .. victim.Name .. " died to " .. killerName .. ", lost " .. lostLength)
+                                    end
+                                    
+                                    -- 其他蛇吃掉这条蛇的长度
+                                    SnakeGameService:AddSnakeLength(otherPid, lostLength)
+                                    
+                                    break
+                                elseif currentScore > otherScore then
+                                    -- 当前蛇更大，其他蛇死亡
+                                    local lostLength = otherSnake.displayLength or #otherSnake.body
+                                    otherSnake.alive = false
+                                    
+                                    -- 获取被杀蛇的信息
+                                    local victim = Players:GetPlayerByUserId(tonumber(otherPid))
+                                    local victimName = victim and victim.Name or "Unknown"
+                                    local killer = Players:GetPlayerByUserId(tonumber(pid))
+                                    
+                                    -- 通知被害者客户端
+                                    if victim then
+                                        SnakeDiedSignal:FireTo(victim, {
+                                            killedBy = killer and killer.Name or "Unknown",
+                                            lostSize = lostLength,
+                                        })
+                                        print("[SnakeGameService] Player " .. victimName .. " died to " .. (killer and killer.Name or "Unknown") .. ", lost " .. lostLength)
+                                    end
+                                    
+                                    -- 当前蛇吃掉其他蛇的长度
+                                    SnakeGameService:AddSnakeLength(pid, lostLength)
+                                    
+                                    break
+                                end
+                            end
+                        end
+                    end
                 end
             end
             
@@ -504,6 +596,14 @@ function SnakeGameService:KnitInit()
                 spawnFood()
                 if #food >= MAX_FOOD then break end
             end
+        end
+        
+        -- 定期更新排行榜（每3帧更新一次）
+        leaderboardUpdateCounter = leaderboardUpdateCounter + 1
+        if leaderboardUpdateCounter >= LEADERBOARD_UPDATE_INTERVAL then
+            leaderboardUpdateCounter = 0
+            local state = SnakeGameService:GetGameState()
+            LeaderboardChangedSignal:Fire(state.leaderboard, state.snakes)
         end
     end)
     

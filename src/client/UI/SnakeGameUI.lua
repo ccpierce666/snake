@@ -195,33 +195,165 @@ local function NextGiftWidget(props)
     local timeLeft = math.max(0, nextReward.time - timePlayed)
     local canClaim = timeLeft <= 0
     
-    return el("TextButton", {
-        Size = UDim2.new(0, 70, 0, 28),
-        BackgroundColor3 = canClaim and Color3.fromRGB(100, 220, 100) or Color3.fromRGB(60, 60, 80),
+    -- 动态选择颜色：可领取时为绿色，否则为蓝色
+    local buttonColor = canClaim and Color3.fromRGB(120, 220, 100) or Color3.fromRGB(60, 150, 255)
+    
+    return Roui.Button({
+        Size = UDim2.new(0, 145, 0, 36),
+        Color = buttonColor,
         Text = "",
-        AutoButtonColor = true,
-        BorderSizePixel = 0,
         [Roact.Event.Activated] = onActivated,
     }, {
-        UICorner = el("UICorner", { CornerRadius = UDim.new(0, 6) }),
-        UIStroke = el("UIStroke", { Thickness = 1, Color = Color3.new(0,0,0) }),
-        Icon = el("ImageLabel", {
-            Size = UDim2.new(0, 14, 0, 14),
-            Position = UDim2.new(0, 3, 0.5, 0),
+        -- 礼包图标
+        GiftIcon = el("TextLabel", {
+            Size = UDim2.new(0, 26, 0, 26),
+            Position = UDim2.new(0, 5, 0.5, 0),
             AnchorPoint = Vector2.new(0, 0.5),
             BackgroundTransparency = 1,
-            Image = "rbxassetid://6034261141",
+            Text = "🎁",
+            TextSize = 22,
+            Font = Enum.Font.GothamBold,
+            TextColor3 = Color3.fromRGB(255, 255, 255),
             ZIndex = 2,
         }),
+        
+        -- 文字标签
         Label = Roui.Text({
             Text = canClaim and "GIFT!" or formatTime(timeLeft),
-            Size = UDim2.new(1, -20, 1, 0),
-            Position = UDim2.new(0, 20, 0, 0),
-            TextSize = 7,
+            Size = UDim2.new(1, -38, 1, 0),
+            Position = UDim2.new(0, 34, 0, 0),
+            TextSize = 11,
             Font = Enum.Font.FredokaOne,
             TextXAlignment = Enum.TextXAlignment.Left,
             ZIndex = 2,
         })
+    })
+end
+
+local function DeathPanel(props)
+    local killedBy = props.killedBy or "Unknown"
+    local lostSize = props.lostSize or 0
+    local onRespawn = props.onRespawn
+    local onRevive = props.onRevive
+    local onRevenge = props.onRevenge
+    
+    return Roui.Overlay({
+        OnClose = onRespawn,
+        Transparency = 0.7,
+    }, {
+        Panel = el("Frame", {
+            Size = UDim2.new(0, 400, 0, 300),
+            Position = UDim2.new(0.5, 0, 0.5, 0),
+            AnchorPoint = Vector2.new(0.5, 0.5),
+            BackgroundColor3 = Color3.fromRGB(40, 40, 50),
+            ZIndex = 101,
+        }, {
+            UICorner = el("UICorner", { CornerRadius = UDim.new(0, 16) }),
+            UIStroke = el("UIStroke", { Thickness = 3, Color = Color3.new(0,0,0) }),
+            
+            -- Title
+            Title = Roui.Text({
+                Text = "You are DEAD",
+                Size = UDim2.new(1, 0, 0, 60),
+                Position = UDim2.new(0, 0, 0, 15),
+                TextSize = 36,
+                Font = Enum.Font.FredokaOne,
+                TextColor3 = Color3.fromRGB(255, 60, 60),
+                ZIndex = 2,
+            }),
+            
+            -- Death Info
+            DeathInfo = Roui.Text({
+                Text = "You died to " .. killedBy .. " and lost " .. lostSize .. " Size!",
+                Size = UDim2.new(0.9, 0, 0, 50),
+                Position = UDim2.new(0.5, 0, 0, 75),
+                AnchorPoint = Vector2.new(0.5, 0),
+                TextSize = 18,
+                Font = Enum.Font.FredokaOne,
+                TextColor3 = Color3.new(1, 1, 1),
+                TextWrapped = true,
+                ZIndex = 2,
+            }),
+            
+            -- Buttons Container
+            ButtonContainer = el("Frame", {
+                Size = UDim2.new(1, 0, 0, 120),
+                Position = UDim2.new(0, 0, 1, -120),
+                BackgroundTransparency = 1,
+                ZIndex = 2,
+            }, {
+                UIListLayout = el("UIListLayout", {
+                    FillDirection = Enum.FillDirection.Vertical,
+                    HorizontalAlignment = Enum.HorizontalAlignment.Center,
+                    VerticalAlignment = Enum.VerticalAlignment.Center,
+                    Padding = UDim.new(0, 10),
+                    SortOrder = Enum.SortOrder.LayoutOrder,
+                }),
+                
+                -- RESPAWN Button (Large, Blue)
+                RespawnBtn = el("TextButton", {
+                    Size = UDim2.new(0, 300, 0, 45),
+                    BackgroundColor3 = Color3.fromRGB(60, 160, 255),
+                    Text = "RESPAWN",
+                    Font = Enum.Font.FredokaOne,
+                    TextSize = 20,
+                    TextColor3 = Color3.new(1, 1, 1),
+                    BorderSizePixel = 0,
+                    LayoutOrder = 1,
+                    [Roact.Event.Activated] = onRespawn,
+                }, {
+                    UICorner = el("UICorner", { CornerRadius = UDim.new(0, 12) }),
+                    UIStroke = el("UIStroke", { Thickness = 2, Color = Color3.new(0,0,0) }),
+                }),
+                
+                -- REVIVE and REVENGE Row
+                BottomRow = el("Frame", {
+                    Size = UDim2.new(0, 300, 0, 40),
+                    BackgroundTransparency = 1,
+                    LayoutOrder = 2,
+                }, {
+                    UIListLayout = el("UIListLayout", {
+                        FillDirection = Enum.FillDirection.Horizontal,
+                        HorizontalAlignment = Enum.HorizontalAlignment.Center,
+                        VerticalAlignment = Enum.VerticalAlignment.Center,
+                        Padding = UDim.new(0, 10),
+                        SortOrder = Enum.SortOrder.LayoutOrder,
+                    }),
+                    
+                    -- REVIVE Button (Pink, with heart)
+                    ReviveBtn = el("TextButton", {
+                        Size = UDim2.new(0, 140, 0, 40),
+                        BackgroundColor3 = Color3.fromRGB(255, 100, 180),
+                        Text = "❤ REVIVE",
+                        Font = Enum.Font.FredokaOne,
+                        TextSize = 16,
+                        TextColor3 = Color3.new(1, 1, 1),
+                        BorderSizePixel = 0,
+                        LayoutOrder = 1,
+                        [Roact.Event.Activated] = onRevive,
+                    }, {
+                        UICorner = el("UICorner", { CornerRadius = UDim.new(0, 10) }),
+                        UIStroke = el("UIStroke", { Thickness = 2, Color = Color3.new(0,0,0) }),
+                    }),
+                    
+                    -- REVENGE Button (Red, with sword)
+                    RevengeBtn = el("TextButton", {
+                        Size = UDim2.new(0, 140, 0, 40),
+                        BackgroundColor3 = Color3.fromRGB(255, 40, 40),
+                        Text = "⚔ REVENGE",
+                        Font = Enum.Font.FredokaOne,
+                        TextSize = 16,
+                        TextColor3 = Color3.new(1, 1, 1),
+                        BorderSizePixel = 0,
+                        LayoutOrder = 2,
+                        [Roact.Event.Activated] = onRevenge,
+                    }, {
+                        UICorner = el("UICorner", { CornerRadius = UDim.new(0, 10) }),
+                        UIStroke = el("UIStroke", { Thickness = 2, Color = Color3.new(0,0,0) }),
+                    }),
+                }),
+            }),
+        }),
     })
 end
 
@@ -446,8 +578,8 @@ function SnakeGameUIRoot:render()
     children.Leaderboard = buildLeaderboard(state)
 
     children.NextGiftWidgetCont = el("Frame", {
-        Position = UDim2.new(1, -85, 0, 115),
-        Size = UDim2.new(0, 75, 0, 30),
+        Position = UDim2.new(1, -155, 0, 115),
+        Size = UDim2.new(0, 145, 0, 40),
         BackgroundTransparency = 1,
     }, {
         Widget = NextGiftWidget({ 
@@ -512,6 +644,16 @@ function SnakeGameUIRoot:render()
             giftData = giftData,
             onClose = SnakeGameUI.Callbacks.onToggleGiftPanel,
             onClaim = SnakeGameUI.Callbacks.onClaimGift,
+        })
+    end
+
+    if state.isDead then
+        children.DeathPanel = Roact.createElement(DeathPanel, {
+            killedBy = state.killedBy or "Unknown",
+            lostSize = state.lostSize or 0,
+            onRespawn = SnakeGameUI.Callbacks.onRespawn,
+            onRevive = SnakeGameUI.Callbacks.onRevive,
+            onRevenge = SnakeGameUI.Callbacks.onRevenge,
         })
     end
 

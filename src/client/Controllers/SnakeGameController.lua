@@ -118,10 +118,32 @@ function SnakeGameController:KnitStart()
             end
         end)
     end
+    
+    -- 死亡面板回调
+    SnakeGameUI.Callbacks.onRespawn = function()
+        ClientState.isDead = false
+        SnakeGameUI.Update(ClientState)
+        pcall(function() SnakeGameService:RequestRespawn(Players.LocalPlayer) end)
+    end
+    
+    SnakeGameUI.Callbacks.onRevive = function()
+        -- 复活消耗金钱或钻石（暂未实现具体消耗），直接复活
+        ClientState.isDead = false
+        SnakeGameUI.Update(ClientState)
+        pcall(function() SnakeGameService:RequestRespawn(Players.LocalPlayer) end)
+    end
+    
+    SnakeGameUI.Callbacks.onRevenge = function()
+        -- 复仇：立即复活并继续游戏
+        ClientState.isDead = false
+        SnakeGameUI.Update(ClientState)
+        pcall(function() SnakeGameService:RequestRespawn(Players.LocalPlayer) end)
+    end
 
     -- 3. 初始化 UI 和 3D 视图
     SnakeGameUI.Start()
     SnakeGame3DView.Init()
+    SnakeGame3DView.SetClientStateRef(ClientState) -- 传递 ClientState 引用用于统一分数显示
     -- SpinWheelUI 不需要 Start()，它在 Update() 时动态创建
 
     -- 4. 获取客户端服务
@@ -139,13 +161,6 @@ function SnakeGameController:KnitStart()
         SnakeGameService.SnakeSpawned:Connect(function(userId, spawnPos, color)
             print("[SnakeGameController] SnakeSpawned:", userId, spawnPos)
             SnakeGame3DView.SpawnSnake(userId, spawnPos, color)
-        end)
-    end
-
-    -- 蛇死亡
-    if SnakeGameService.SnakeDied then
-        SnakeGameService.SnakeDied:Connect(function(userId)
-            SnakeGame3DView.RemoveSnake(userId)
         end)
     end
 
@@ -170,9 +185,12 @@ function SnakeGameController:KnitStart()
                 
                 -- 获取该蛇的最新服务器坐标数据
                 local serverSnake = snakesData and snakesData[uid]
-                local syncData = { score = score }
+                local syncData = { score = score, displayLength = serverSnake and serverSnake.displayLength }
                 if serverSnake and serverSnake.body then
                     syncData.body = serverSnake.body
+                    print("[Controller] 更新玩家 " .. uid .. " - 身体长度: " .. #serverSnake.body .. ", 分数: " .. score .. ", displayLength: " .. (serverSnake.displayLength or "nil"))
+                else
+                    print("[Controller] 玩家 " .. uid .. " 没有身体数据 - serverSnake存在: " .. tostring(serverSnake ~= nil) .. ", 分数: " .. score)
                 end
 
                 -- 更新 3D 渲染数据
@@ -220,6 +238,19 @@ function SnakeGameController:KnitStart()
             ClientState.spins = spinsLeft or 0
             -- SpinWheelUI.Update(ClientState)
             print("[SnakeGameController] 抽奖次数已更新: " .. tostring(ClientState.spins))
+        end)
+    end
+    
+    -- 蛇死亡信号
+    if SnakeGameService.SnakeDied then
+        SnakeGameService.SnakeDied:Connect(function(deathData)
+            ClientState.isDead = true
+            ClientState.killedBy = deathData.killedBy or "Unknown"
+            ClientState.lostSize = deathData.lostSize or 0
+            -- 移除当前蛇的 3D 视图
+            SnakeGame3DView.RemoveSnake(tostring(Players.LocalPlayer.UserId))
+            SnakeGameUI.Update(ClientState)
+            print("[SnakeGameController] 玩家死亡: " .. ClientState.killedBy .. ", 损失: " .. ClientState.lostSize)
         end)
     end
 
@@ -288,7 +319,7 @@ function SnakeGameController:KnitStart()
         if isAutoMode then
              isAutoMode = false
              ClientState.autoMode = false
-             -- 【临时禁用】SnakeGameUI.Update(ClientState)
+             SnakeGameUI.Update(ClientState)
              print("[SnakeGameController] 用户操作，自动模式关闭")
         end
 

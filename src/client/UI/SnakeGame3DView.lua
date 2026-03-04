@@ -8,8 +8,16 @@ local SnakeGame3DView = {}
 local gameFolder = nil
 local snakeParts = {} -- [index] = Part
 local activeFoodParts = {} -- [id] = Part
-local ringDashes = {} -- 虚线圈的 Parts
+local ringDashes = {} -- 虚线圈的 Parts (本地玩家)
+local otherPlayersRingDashes = {} -- [userId] = {} (其他玩家的虚线圈)
 local ringAngleOffset = 0
+local snakeHeadLabels = {} -- [userId] = { label, lastUpdated }
+local snakeHeadNameLabels = {} -- [userId] = TextLabel (3D 世界中的名称标签)
+local snakeLengthLabels = {} -- [userId] = BillboardGui (蛇头下方的长度标签)
+local clientStateRef = nil -- 外部传入的 ClientState 引用
+local snakeHeadPartMap = {} -- [userId] = snakePart (映射userId到其蛇头Part的关系)
+local lastDisplayedScore = {} -- [userId] = lastScore (缓存上次显示的分数，避免重复更新)
+local lastDisplayedLength = {} -- [userId] = lastLength (缓存上次显示的身体倍数，避免重复更新)
 
 -- Cartoon colors
 local SNAKE_BODY_COLOR = Color3.fromRGB(255, 180, 80)     -- Warm Orange
@@ -33,6 +41,14 @@ local snakePositions = {}
 local localPlayerUserId = nil
 local otherSnakes = {}
 
+local function getKeys(t)
+    local keys = {}
+    for k in pairs(t) do
+        table.insert(keys, tostring(k))
+    end
+    return keys
+end
+
 local function createPart(parent, color, size, shape, material)
     shape = shape or Enum.PartType.Ball
     material = material or Enum.Material.SmoothPlastic
@@ -48,6 +64,28 @@ local function createPart(parent, color, size, shape, material)
     part.BottomSurface = Enum.SurfaceType.Smooth
     part.Parent = parent
     return part
+end
+
+local function markSnakeHeadPart(part, userId)
+    -- 在Part上标记userId，这样可以在任何时候通过Part找到userId
+    local tag = part:FindFirstChild("userId")
+    if not tag then
+        tag = Instance.new("StringValue")
+        tag.Name = "userId"
+        tag.Parent = part
+    end
+    tag.Value = tostring(userId)
+end
+
+local function getSnakeHeadUserIdFromPart(part)
+    -- 从Part上取出userId标记
+    if part then
+        local tag = part:FindFirstChild("userId")
+        if tag and tag.Value then
+            return tag.Value
+        end
+    end
+    return nil
 end
 
 local function hideCharacter(player)
@@ -66,6 +104,112 @@ local function hideCharacter(player)
             hrp.CFrame = CFrame.new(0, 100, 0)
         end
     end
+end
+
+-- 创建虚线圈集合
+local function createRingDashesForSnake(parent, count)
+    local dashes = {}
+    for i = 1, count do
+        local dash = createPart(parent, Color3.fromRGB(200, 200, 255), 0.4, Enum.PartType.Block, Enum.Material.Neon)
+        dash.CanCollide = false
+        table.insert(dashes, {
+            part = dash,
+            angle = (2 * math.pi / count) * (i - 1)
+        })
+    end
+    return dashes
+end
+
+-- 为蛇头创建名称标签 (BillboardGui) - 分开显示分数和名字
+local function createSnakeHeadLabel(userId)
+    local player = Players:GetPlayerByUserId(tonumber(userId))
+    if not player then return nil end
+    
+    local playerName = player.Name
+    local screenGui = Instance.new("BillboardGui")
+    screenGui.Size = UDim2.new(6, 0, 4, 0)
+    screenGui.MaxDistance = 0  -- 初始禁用，直到在Heartbeat中正确绑定到蛇头
+    screenGui.StudsOffset = Vector3.new(0, 4.5, 0)
+    screenGui.Adornee = nil
+    
+    -- 顶部容器：放分数
+    local scoreContainer = Instance.new("Frame")
+    scoreContainer.Name = "scoreContainer"
+    scoreContainer.Size = UDim2.new(1, 0, 0.5, 0)
+    scoreContainer.Position = UDim2.new(0, 0, 0, 0)
+    scoreContainer.BackgroundTransparency = 1
+    scoreContainer.Parent = screenGui
+    
+    local scoreLabel = Instance.new("TextLabel")
+    scoreLabel.Size = UDim2.new(1, 0, 1, 0)
+    scoreLabel.BackgroundTransparency = 1
+    scoreLabel.TextColor3 = Color3.fromRGB(255, 255, 255)
+    scoreLabel.TextScaled = true
+    scoreLabel.Font = Enum.Font.FredokaOne
+    scoreLabel.Text = "0"
+    scoreLabel.ZIndex = 2
+    
+    local scoreStroke = Instance.new("UIStroke")
+    scoreStroke.Thickness = 2
+    scoreStroke.Color = Color3.fromRGB(0, 0, 0)
+    scoreStroke.Parent = scoreLabel
+    
+    scoreLabel.Parent = scoreContainer
+    
+    -- 底部容器：放名字
+    local nameContainer = Instance.new("Frame")
+    nameContainer.Name = "nameContainer"
+    nameContainer.Size = UDim2.new(1, 0, 0.5, 0)
+    nameContainer.Position = UDim2.new(0, 0, 0.5, 0)
+    nameContainer.BackgroundTransparency = 1
+    nameContainer.Parent = screenGui
+    
+    local nameLabel = Instance.new("TextLabel")
+    nameLabel.Size = UDim2.new(1, 0, 1, 0)
+    nameLabel.BackgroundTransparency = 1
+    nameLabel.TextColor3 = Color3.fromRGB(255, 255, 100)
+    nameLabel.TextScaled = true
+    nameLabel.Font = Enum.Font.FredokaOne
+    nameLabel.Text = playerName
+    nameLabel.ZIndex = 2
+    
+    local nameStroke = Instance.new("UIStroke")
+    nameStroke.Thickness = 1.5
+    nameStroke.Color = Color3.fromRGB(0, 0, 0)
+    nameStroke.Parent = nameLabel
+    
+    nameLabel.Parent = nameContainer
+    
+    screenGui.Parent = gameFolder
+    
+    return screenGui
+end
+
+-- 为蛇头创建长度标签 (蛇头下方显示数字)
+local function createSnakeLengthLabel(userId)
+    local screenGui = Instance.new("BillboardGui")
+    screenGui.Size = UDim2.new(3, 0, 2, 0)
+    screenGui.MaxDistance = 0  -- 初始禁用，直到在Heartbeat中正确绑定到蛇头
+    screenGui.StudsOffset = Vector3.new(0, -2, 0) -- 蛇头下方
+    screenGui.Adornee = nil -- 将由Heartbeat更新
+    
+    local textLabel = Instance.new("TextLabel")
+    textLabel.Size = UDim2.new(1, 0, 1, 0)
+    textLabel.BackgroundTransparency = 1
+    textLabel.TextColor3 = Color3.fromRGB(255, 255, 255)
+    textLabel.TextScaled = true
+    textLabel.Font = Enum.Font.FredokaOne
+    textLabel.Text = "0"
+    
+    local stroke = Instance.new("UIStroke")
+    stroke.Thickness = 2
+    stroke.Color = Color3.fromRGB(0, 0, 0)
+    stroke.Parent = textLabel
+    
+    textLabel.Parent = screenGui
+    screenGui.Parent = gameFolder
+    
+    return screenGui
 end
 
 local function calculateBodySize(currentLength)
@@ -281,15 +425,18 @@ function SnakeGame3DView.Init()
             ringAngleOffset = ringAngleOffset - 0.025
             
             -- 动态计算圈的大小 (同步服务器 PICKUP_RADIUS 逻辑)
-            local currentScore = localPlayerSnakeState.logicalLength or #localPlayerSnakeState.body
+            local currentScore = localPlayerSnakeState.displayLength or #localPlayerSnakeState.body
             local bodySize = calculateBodySize(currentScore)
             local currentRingRadius = 5.5 + (bodySize * 0.8) -- 稍微比蛇身大一点
+            
+            -- 蛇头的实际渲染位置（与 snakeParts 渲染位置一致）
+            local headRenderY = 0.4
 
             for _, dash in ipairs(ringDashes) do
                 local a = dash.angle + ringAngleOffset
                 local x = head.X + math.cos(a) * currentRingRadius
                 local z = head.Z + math.sin(a) * currentRingRadius
-                dash.part.CFrame = CFrame.new(x, 0.45, z) * CFrame.Angles(0, -(a + math.pi / 2), 0)
+                dash.part.CFrame = CFrame.new(x, headRenderY, z) * CFrame.Angles(0, -(a + math.pi / 2), 0)
                 -- 调整虚线的大小
                 dash.part.Size = Vector3.new(0.8 + bodySize * 0.1, 0.2, 0.4 + bodySize * 0.05)
             end
@@ -301,8 +448,9 @@ function SnakeGame3DView.Init()
 
         -- 2. 渲染蛇
         snakePositions = {}
+        local snakeHeads = {} -- [snakePositions index] = userId (for name label positioning)
 
-        local function addSnakeRenderPoints(body, isLocal, bodySize)
+        local function addSnakeRenderPoints(body, isLocal, bodySize, userId)
             if not body or #body == 0 then return end
 
             -- 客户端强制边界限制 (视觉修正，防止穿墙)
@@ -318,6 +466,7 @@ function SnakeGame3DView.Init()
                 isHead = true,
                 color = isLocal and Color3.fromRGB(255, 100, 100) or Color3.fromRGB(100, 100, 255),
             })
+            table.insert(snakeHeads, userId)
 
             local accumulatedDist = 0
 
@@ -338,20 +487,21 @@ function SnakeGame3DView.Init()
                         isHead = false,
                         color = isLocal and Color3.fromRGB(100, 220, 100) or Color3.fromRGB(50, 50, 200),
                     })
+                    table.insert(snakeHeads, nil) -- non-head parts don't have userId
                 end
             end
         end
 
-        local currentLength = localPlayerSnakeState and (localPlayerSnakeState.logicalLength or #localPlayerSnakeState.body) or 0
+        local currentLength = localPlayerSnakeState and (localPlayerSnakeState.displayLength or #localPlayerSnakeState.body) or 0
         local bodySize = calculateBodySize(currentLength)
 
         if localPlayerSnakeState then
-            addSnakeRenderPoints(localPlayerSnakeState.body, true, bodySize)
+            addSnakeRenderPoints(localPlayerSnakeState.body, true, bodySize, tostring(Players.LocalPlayer.UserId))
         end
 
-        for _, s in pairs(otherSnakes) do
-            local otherBodySize = calculateBodySize(s.logicalLength or #s.body)
-            addSnakeRenderPoints(s.body, false, otherBodySize)
+        for userId, s in pairs(otherSnakes) do
+            local otherBodySize = calculateBodySize(s.displayLength or #s.body)
+            addSnakeRenderPoints(s.body, false, otherBodySize, userId)
         end
 
         local needed = #snakePositions
@@ -361,6 +511,9 @@ function SnakeGame3DView.Init()
             table.insert(snakeParts, part)
         end
 
+        -- 清空 snakeHeadPartMap，准备重新映射
+        snakeHeadPartMap = {}
+        
         for i = 1, #snakeParts do
             if i <= needed and snakePositions[i] then
                 local pos = snakePositions[i]
@@ -370,9 +523,251 @@ function SnakeGame3DView.Init()
                 local sz = isHead and (bodySize * 1.5) or bodySize
                 snakeParts[i].Size = Vector3.new(sz, sz, sz)
                 snakeParts[i].Transparency = 0
+                
+                -- 如果是蛇头，标记userId并保存到映射中
+                if isHead and snakeHeads[i] then
+                    local userId = snakeHeads[i]
+                    markSnakeHeadPart(snakeParts[i], userId)
+                    snakeHeadPartMap[userId] = snakeParts[i]
+                end
             else
                 snakeParts[i].Transparency = 1
                 snakeParts[i].Position = Vector3.new(0, -10000, 0)
+            end
+        end
+
+        -- 更新其他玩家蛇头的虚线圈
+        for userId, dashes in pairs(otherPlayersRingDashes) do
+            if otherSnakes[userId] and otherSnakes[userId].body and #otherSnakes[userId].body > 0 then
+                local head = otherSnakes[userId].body[1]
+                local score = otherSnakes[userId].displayLength or #otherSnakes[userId].body
+                local otherBodySize = calculateBodySize(score)
+                local currentRingRadius = 5.5 + (otherBodySize * 0.8)
+                
+                -- 蛇头的实际渲染位置（与 snakeParts 渲染位置一致）
+                local headRenderY = 0.4
+                
+                for _, dash in ipairs(dashes) do
+                    local a = dash.angle + ringAngleOffset
+                    local x = head.X + math.cos(a) * currentRingRadius
+                    local z = head.Z + math.sin(a) * currentRingRadius
+                    dash.part.CFrame = CFrame.new(x, headRenderY, z) * CFrame.Angles(0, -(a + math.pi / 2), 0)
+                    dash.part.Size = Vector3.new(0.8 + otherBodySize * 0.1, 0.2, 0.4 + otherBodySize * 0.05)
+                end
+            else
+                for _, dash in ipairs(dashes) do
+                    dash.part.Position = Vector3.new(0, -50, 0)
+                end
+            end
+        end
+
+        -- 更新所有蛇头的名称标签
+        -- 本地玩家
+        if localPlayerSnakeState and localPlayerSnakeState.body and #localPlayerSnakeState.body > 0 then
+            local localUserId = tostring(Players.LocalPlayer.UserId)
+            local localLabel = snakeHeadNameLabels[localUserId]
+            if not localLabel then
+                localLabel = createSnakeHeadLabel(localUserId)
+                snakeHeadNameLabels[localUserId] = localLabel
+            end
+            if localLabel then
+                -- 使用 ClientState 中的分数（统一数据源）
+                local score = (clientStateRef and clientStateRef.score) or (localPlayerSnakeState.logicalLength or #localPlayerSnakeState.body)
+                local displayLength = localPlayerSnakeState.displayLength or #localPlayerSnakeState.body
+                
+                -- 始终绑定到蛇头，确保标签跟随蛇头
+                if #snakeParts > 0 and snakeParts[1].Parent then
+                    localLabel.Adornee = snakeParts[1]
+                    -- 恢复标签显示距离
+                    if localLabel.MaxDistance == 0 then
+                        localLabel.MaxDistance = 500
+                    end
+                else
+                    -- 禁用标签显示
+                    if localLabel.MaxDistance ~= 0 then
+                        localLabel.MaxDistance = 0
+                    end
+                end
+                
+                -- 在分数或displayLength变化时更新标签文本和位置
+                if (lastDisplayedScore[localUserId] or 0) ~= score or (lastDisplayedLength[localUserId] or 0) ~= displayLength then
+                    lastDisplayedScore[localUserId] = score
+                    lastDisplayedLength[localUserId] = displayLength
+                    
+                    local bodySize = calculateBodySize(displayLength)
+                    
+                    -- 根据蛇头大小动态调整标签位置
+                    local labelOffsetY = 3.5 + (bodySize * 0.75)
+                    localLabel.StudsOffset = Vector3.new(0, labelOffsetY, 0)
+                    
+                    -- 更新分数标签
+                    local scoreContainer = localLabel:FindFirstChild("scoreContainer")
+                    if scoreContainer then
+                        local scoreLabel = scoreContainer:FindFirstChild("TextLabel")
+                        if scoreLabel then
+                            scoreLabel.Text = tostring(math.floor(score))
+                        end
+                    end
+                    
+                    -- 更新名字标签
+                    local nameContainer = localLabel:FindFirstChild("nameContainer")
+                    if nameContainer then
+                        local nameLabel = nameContainer:FindFirstChild("TextLabel")
+                        if nameLabel then
+                            nameLabel.Text = Players.LocalPlayer.Name
+                        end
+                    end
+                end
+            end
+        end
+        
+        -- 其他玩家
+        for userId, label in pairs(snakeHeadNameLabels) do
+            if userId ~= tostring(Players.LocalPlayer.UserId) then
+                if otherSnakes[userId] and otherSnakes[userId].body and #otherSnakes[userId].body > 0 then
+                    if label then
+                        local score = otherSnakes[userId].logicalLength or #otherSnakes[userId].body
+                        local displayLength = otherSnakes[userId].displayLength or #otherSnakes[userId].body
+                        
+                        -- 查找该玩家的蛇头Part：首先从缓存中查找，如果不存在则从所有Part中扫描
+                        local headPart = snakeHeadPartMap[userId]
+                        if not headPart then
+                            -- 从所有snakeParts中查找带有此userId标记的蛇头
+                            for _, part in ipairs(snakeParts) do
+                                if part.Parent then  -- 只检查还在场景中的Part
+                                    local partUserId = getSnakeHeadUserIdFromPart(part)
+                                    if partUserId == userId then
+                                        headPart = part
+                                        snakeHeadPartMap[userId] = headPart  -- 缓存起来
+                                        break
+                                    end
+                                end
+                            end
+                        end
+                        
+                        if headPart and headPart.Parent then
+                            label.Adornee = headPart
+                            -- 恢复标签显示距离
+                            if label.MaxDistance == 0 then
+                                label.MaxDistance = 500
+                            end
+                        else
+                            -- 如果蛇头Part还没有被渲染，禁用标签显示（MaxDistance=0）
+                            if label.MaxDistance ~= 0 then
+                                label.MaxDistance = 0
+                            end
+                        end
+                        
+                        -- 在分数或displayLength变化时更新标签文本和位置
+                        if (lastDisplayedScore[userId] or 0) ~= score or (lastDisplayedLength[userId] or 0) ~= displayLength then
+                            lastDisplayedScore[userId] = score
+                            lastDisplayedLength[userId] = displayLength
+                            
+                            local bodySize = calculateBodySize(displayLength)
+                            
+                            -- 根据蛇头大小动态调整标签位置
+                            local labelOffsetY = 3.5 + (bodySize * 0.75)
+                            label.StudsOffset = Vector3.new(0, labelOffsetY, 0)
+                            
+                            local player = Players:GetPlayerByUserId(tonumber(userId))
+                            local playerName = player and player.Name or "Unknown"
+                            
+                            -- 更新分数标签
+                            local scoreContainer = label:FindFirstChild("scoreContainer")
+                            if scoreContainer then
+                                local scoreLabel = scoreContainer:FindFirstChild("TextLabel")
+                                if scoreLabel then
+                                    scoreLabel.Text = tostring(math.floor(score))
+                                end
+                            end
+                            
+                            -- 更新名字标签
+                            local nameContainer = label:FindFirstChild("nameContainer")
+                            if nameContainer then
+                                local nameLabel = nameContainer:FindFirstChild("TextLabel")
+                                if nameLabel then
+                                    nameLabel.Text = playerName
+                                end
+                            end
+                        end
+                    end
+                else
+                    if label then
+                        label.Adornee = nil
+                    end
+                end
+            end
+        end
+        
+        -- 更新所有蛇头的长度标签
+        -- 本地玩家
+        if localPlayerSnakeState and localPlayerSnakeState.body and #localPlayerSnakeState.body > 0 then
+            local localLengthLabel = snakeLengthLabels[tostring(Players.LocalPlayer.UserId)]
+            if not localLengthLabel then
+                localLengthLabel = createSnakeLengthLabel(tostring(Players.LocalPlayer.UserId))
+                snakeLengthLabels[tostring(Players.LocalPlayer.UserId)] = localLengthLabel
+            end
+            if localLengthLabel then
+                if #snakeParts > 0 and snakeParts[1].Parent then
+                    local score = localPlayerSnakeState.logicalLength or #localPlayerSnakeState.body
+                    local textLabel = localLengthLabel:FindFirstChild("TextLabel")
+                    if textLabel then
+                        textLabel.Text = tostring(math.floor(score))
+                    end
+                    localLengthLabel.Adornee = snakeParts[1]
+                    -- 恢复标签显示距离
+                    if localLengthLabel.MaxDistance == 0 then
+                        localLengthLabel.MaxDistance = 500
+                    end
+                else
+                    -- 禁用标签显示
+                    if localLengthLabel.MaxDistance ~= 0 then
+                        localLengthLabel.MaxDistance = 0
+                    end
+                end
+            end
+        end
+        
+        -- 其他玩家的长度标签
+        for userId, lengthLabel in pairs(snakeLengthLabels) do
+            if userId ~= tostring(Players.LocalPlayer.UserId) then
+                if otherSnakes[userId] and otherSnakes[userId].body and #otherSnakes[userId].body > 0 then
+                    if lengthLabel then
+                        local score = otherSnakes[userId].logicalLength or #otherSnakes[userId].body
+                        local textLabel = lengthLabel:FindFirstChild("TextLabel")
+                        if textLabel then
+                            textLabel.Text = tostring(math.floor(score))
+                        end
+                        
+                        -- 找到对应的 snakeParts 蛇头
+                        local headPart = nil
+                        for _, part in ipairs(snakeParts) do
+                            if part.Parent then  -- 只检查还在场景中的Part
+                                local partUserId = getSnakeHeadUserIdFromPart(part)
+                                if partUserId == userId then
+                                    headPart = part
+                                    break
+                                end
+                            end
+                        end
+                        if headPart and headPart.Parent then
+                            lengthLabel.Adornee = headPart
+                            -- 恢复标签显示距离
+                            if lengthLabel.MaxDistance == 0 then
+                                lengthLabel.MaxDistance = 500
+                            end
+                        else
+                            -- 如果蛇头Part还没有被渲染，禁用标签显示
+                            if lengthLabel.MaxDistance ~= 0 then
+                                lengthLabel.MaxDistance = 0
+                            end
+                        end
+                    end
+                else
+                    if lengthLabel then
+                        lengthLabel.Adornee = nil
+                    end
+                end
             end
         end
 
@@ -409,7 +804,9 @@ function SnakeGame3DView.SpawnSnake(userId, body, color)
             targetDirection = Vector3.new(0, 0, 0),
             isMoving = false,
             growQueue = 0,
-            alive = true
+            alive = true,
+            logicalLength = #body,  -- 初始化为身体长度
+            displayLength = #body   -- 初始化身体放大倍数
         }
     else
         local p = Players:GetPlayerByUserId(tonumber(userId))
@@ -420,8 +817,34 @@ function SnakeGame3DView.SpawnSnake(userId, body, color)
             direction = Vector3.new(1, 0, 0),
             targetDirection = Vector3.new(0, 0, 0),
             isMoving = false,
-            alive = true
+            alive = true,
+            userId = userId,
+            logicalLength = #body,  -- 初始化为身体长度
+            displayLength = #body   -- 初始化身体放大倍数
         }
+        
+        -- 为其他玩家的蛇创建虚线圈
+        if not otherPlayersRingDashes[userId] then
+            otherPlayersRingDashes[userId] = createRingDashesForSnake(gameFolder, 20)
+        end
+        
+        -- 为其他玩家的蛇创建名称标签
+        if not snakeHeadNameLabels[userId] then
+            local label = createSnakeHeadLabel(userId)
+            if label then
+                snakeHeadNameLabels[userId] = label
+                -- 标签创建后，暂时绑定到一个离屏位置，Heartbeat会尽快更新
+                label.Adornee = nil
+            end
+        end
+        
+        -- 为其他玩家的蛇创建长度标签
+        if not snakeLengthLabels[userId] then
+            local label = createSnakeLengthLabel(userId)
+            if label then
+                snakeLengthLabels[userId] = label
+            end
+        end
     end
 end
 
@@ -440,6 +863,7 @@ function SnakeGame3DView.UpdateSnakeData(userId, data)
         elseif data.pos then
              body = {data.pos}
         end
+        print("[3DView] 为玩家 " .. userId .. " 生成蛇，身体长度: " .. #body .. ", 分数: " .. (data.score or 0))
         SnakeGame3DView.SpawnSnake(userId, body)
         snake = (userId == localUserId) and localPlayerSnakeState or otherSnakes[userId]
     end
@@ -450,16 +874,27 @@ function SnakeGame3DView.UpdateSnakeData(userId, data)
             snake.targetDirection = data.dir
             snake.isMoving = data.isMoving
         end
-        if data.score then
+        if data.score and data.score > 0 then
+            local oldLength = snake.logicalLength
             snake.logicalLength = data.score
+            if oldLength ~= data.score then
+                print("[3DView] 玩家 " .. userId .. " logicalLength 更新: " .. (oldLength or "nil") .. " -> " .. data.score)
+            end
+        end
+        -- 同步身体放大倍数（displayLength）
+        if data.displayLength then
+            snake.displayLength = data.displayLength
+            print("[3DView] 玩家 " .. userId .. " displayLength 更新: " .. data.displayLength)
         end
         -- 核心修复：同步服务器的身体节数，确保生长后长度增加
         if data.body then
             if userId ~= localUserId then
+                print("[3DView] 玩家 " .. userId .. " 身体数据更新: 旧长度=" .. #snake.body .. ", 新长度=" .. #data.body)
                 snake.body = data.body
             else
                 -- 对于本地蛇，如果服务器更长（说明发生了生长），则采纳服务器的长度
                 if #data.body > #snake.body then
+                    print("[3DView] 本地蛇身体数据更新: 旧长度=" .. #snake.body .. ", 新长度=" .. #data.body)
                     snake.body = data.body
                 end
             end
@@ -473,6 +908,26 @@ function SnakeGame3DView.RemoveSnake(userId)
         localPlayerSnakeState = nil
     else
         otherSnakes[userId] = nil
+        
+        -- 清理虚线圈
+        if otherPlayersRingDashes[userId] then
+            for _, dash in ipairs(otherPlayersRingDashes[userId]) do
+                dash.part:Destroy()
+            end
+            otherPlayersRingDashes[userId] = nil
+        end
+        
+        -- 清理名称标签
+        if snakeHeadNameLabels[userId] then
+            snakeHeadNameLabels[userId]:Destroy()
+            snakeHeadNameLabels[userId] = nil
+        end
+        
+        -- 清理长度标签
+        if snakeLengthLabels[userId] then
+            snakeLengthLabels[userId]:Destroy()
+            snakeLengthLabels[userId] = nil
+        end
     end
 end
 
@@ -553,6 +1008,11 @@ function SnakeGame3DView.Cleanup()
     if Workspace.CurrentCamera then
         Workspace.CurrentCamera.CameraType = Enum.CameraType.Custom
     end
+end
+
+-- 设置客户端状态引用（用于统一的分数更新）
+function SnakeGame3DView.SetClientStateRef(clientState)
+    clientStateRef = clientState
 end
 
 return SnakeGame3DView

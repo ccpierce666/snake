@@ -83,9 +83,9 @@ end
 
 -- StatBar component (Top bars: Score/Money)
 function Roui.StatBar(props)
-    local height = 50
+    local height = 32
     props = mergeProps(props, {
-        Size = UDim2.new(0, 260, 0, height),
+        Size = UDim2.new(0, 112, 0, height),
         BackgroundColor3 = Color3.fromRGB(160, 100, 255), -- Default Purple
         BorderSizePixel = 0,
     })
@@ -93,26 +93,26 @@ function Roui.StatBar(props)
     local iconContent
     if isAssetId(props.Icon) then
         iconContent = el("ImageLabel", {
-            Position = UDim2.new(0, 5, 0.5, 0),
+            Position = UDim2.new(0, 4, 0.5, 0),
             AnchorPoint = Vector2.new(0, 0.5),
-            Size = UDim2.new(0, 36, 0, 36),
+            Size = UDim2.new(0, 24, 0, 24),
             BackgroundTransparency = 1,
             Image = props.Icon,
         })
     else
         iconContent = Roui.Text({
-            Position = UDim2.new(0, 10, 0.5, 0),
+            Position = UDim2.new(0, 5, 0.5, 0),
             AnchorPoint = Vector2.new(0, 0.5),
-            Size = UDim2.new(0, 30, 0, 30),
+            Size = UDim2.new(0, 20, 0, 20),
             Text = props.Icon or "🐍",
-            TextSize = 24,
+            TextSize = 16,
             BackgroundTransparency = 1,
         })
     end
     
     return el("Frame", props, {
         UICorner = Corner(height/2), -- Pill shape
-        UIStroke = Border(4),
+        UIStroke = Border(1),
         
         -- Icon Container
         Icon = iconContent,
@@ -120,28 +120,28 @@ function Roui.StatBar(props)
         -- Value Text
         Value = Roui.Text({
             Name = props.LabelName or "ValueLabel",
-            Position = UDim2.new(0, 50, 0, 0),
-            Size = UDim2.new(1, -90, 1, 0),
+            Position = UDim2.new(0, 32, 0, 0),
+            Size = UDim2.new(1, -52, 1, 0),
             Text = props.Value or "0",
-            TextSize = 28,
+            TextSize = 14,
             TextXAlignment = Enum.TextXAlignment.Left,
             Font = Enum.Font.FredokaOne,
         }),
         
         -- Plus Button
         AddBtn = el("ImageButton", {
-            Position = UDim2.new(1, -40, 0.5, 0),
+            Position = UDim2.new(1, -20, 0.5, 0),
             AnchorPoint = Vector2.new(0, 0.5),
-            Size = UDim2.new(0, 32, 0, 32),
+            Size = UDim2.new(0, 18, 0, 18),
             BackgroundColor3 = Color3.fromRGB(50, 200, 50),
             BorderSizePixel = 0,
         }, {
-            UICorner = Corner(16),
-            UIStroke = Border(3),
+            UICorner = Corner(9),
+            UIStroke = Border(1),
             PlusIcon = Roui.Text({
                 Size = UDim2.new(1, 0, 1, -2),
                 Text = "+",
-                TextSize = 24,
+                TextSize = 14,
                 Font = Enum.Font.GothamBlack,
             })
         })
@@ -244,7 +244,7 @@ end
 -- LeaderboardRow component (Updated style)
 function Roui.LeaderboardRow(props)
     props = mergeProps(props, {
-        Size = UDim2.new(1, 0, 0, 32),
+        Size = UDim2.new(1, 0, 0, 18),
         BackgroundTransparency = 1,
         LayoutOrder = props.Rank or 0,
     })
@@ -254,7 +254,7 @@ function Roui.LeaderboardRow(props)
         bgColor = Color3.fromRGB(255, 200, 50) -- Gold for top 3
     end
     
-    return el("Frame", props, {
+    local children = {
         Background = el("Frame", {
             Size = UDim2.new(1, 0, 1, 0),
             BackgroundColor3 = bgColor,
@@ -262,38 +262,70 @@ function Roui.LeaderboardRow(props)
             ZIndex = 0,
         }, {
             UICorner = Corner(6),
-            UIStroke = Border(2),
+            UIStroke = Border(1),
         }),
         Rank = Roui.Text({
-            Position = UDim2.new(0, 5, 0, 0),
-            Size = UDim2.new(0, 25, 1, 0),
+            Position = UDim2.new(0, 2, 0, 0),
+            Size = UDim2.new(0, 12, 1, 0),
             Text = tostring(props.Rank or 1),
-            TextSize = 16,
+            TextSize = 8,
             ZIndex = 1,
         }),
-        Name = Roui.Text({
-            Position = UDim2.new(0, 35, 0, 0),
-            Size = UDim2.new(0.6, -35, 1, 0),
+    }
+    
+    -- 如果有提供 UserId，显示头像
+    if props.UserId then
+        children.Avatar = el("ImageLabel", {
+            Position = UDim2.new(0, 16, 0.5, 0),
+            AnchorPoint = Vector2.new(0, 0.5),
+            Size = UDim2.new(0, 12, 0, 12),
+            BackgroundTransparency = 1,
+            Image = "https://www.roblox.com/bust-thumbnails/v1/avatar?userId=" .. props.UserId .. "&width=48&height=48&format=png",
+            ZIndex = 1,
+        })
+        children.Name = Roui.Text({
+            Position = UDim2.new(0, 31, 0, 0),
+            Size = UDim2.new(0.45, -31, 1, 0),
             Text = props.Name or "Player",
-            TextSize = 16,
+            TextSize = 7,
             TextXAlignment = Enum.TextXAlignment.Left,
             ZIndex = 1,
-        }),
-        Score = Roui.Text({
-            Position = UDim2.new(0.6, 0, 0, 0),
-            Size = UDim2.new(0.4, -5, 1, 0),
+        })
+        children.Score = Roui.Text({
+            Position = UDim2.new(0.45, 0, 0, 0),
+            Size = UDim2.new(0.55, -2, 1, 0),
             Text = tostring(props.Score or 0),
-            TextSize = 16,
+            TextSize = 7,
             TextXAlignment = Enum.TextXAlignment.Right,
             ZIndex = 1,
-        }),
-    })
+        })
+    else
+        -- 没有头像时的布局
+        children.Name = Roui.Text({
+            Position = UDim2.new(0, 16, 0, 0),
+            Size = UDim2.new(0.6, -16, 1, 0),
+            Text = props.Name or "Player",
+            TextSize = 8,
+            TextXAlignment = Enum.TextXAlignment.Left,
+            ZIndex = 1,
+        })
+        children.Score = Roui.Text({
+            Position = UDim2.new(0.6, 0, 0, 0),
+            Size = UDim2.new(0.4, -3, 1, 0),
+            Text = tostring(props.Score or 0),
+            TextSize = 8,
+            TextXAlignment = Enum.TextXAlignment.Right,
+            ZIndex = 1,
+        })
+    end
+    
+    return el("Frame", props, children)
 end
 
 -- Leaderboard component (Updated style)
 function Roui.Leaderboard(props, children)
     props = mergeProps(props, {
-        Size = UDim2.new(0, 180, 0, 300),
+        Size = UDim2.new(0, 75, 0, 120),
         BackgroundColor3 = Color3.fromRGB(40, 40, 50),
         BorderSizePixel = 0,
     })

@@ -288,6 +288,10 @@ function SnakeGameService:RequestRespawn(player)
         displayLength = INITIAL_LENGTH
     }
     SnakeSpawnedSignal:Fire(player.UserId, body, Color3.new(math.random(), math.random(), math.random()))
+    
+    -- 玩家重生时也发送排行榜更新
+    local state = self:GetGameState()
+    LeaderboardChangedSignal:Fire(state.leaderboard, state.snakes)
 end
 
 -- 抽奖功能

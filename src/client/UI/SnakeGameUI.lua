@@ -61,7 +61,7 @@ local function actionBtn(label, bgColor, props)
         UICorner = el("UICorner", { CornerRadius = UDim.new(0.3, 0) }),
         UIStroke = el("UIStroke", {
             Color = Color3.fromRGB(0, 0, 50),
-            Thickness = 3,
+            Thickness = 1,
             ApplyStrokeMode = Enum.ApplyStrokeMode.Border,
         }),
     }
@@ -70,8 +70,8 @@ local function actionBtn(label, bgColor, props)
         for k, v in pairs(props.Children) do children[k] = v end
     end
 
-    return el("TextButton", {
-        Size = props.Size or UDim2.new(0, 120, 0, 50),
+    local buttonProps = {
+        Size = props.Size or UDim2.new(0, 65, 0, 38),
         Position = props.Position,
         AnchorPoint = props.AnchorPoint,
         LayoutOrder = props.LayoutOrder,
@@ -80,13 +80,18 @@ local function actionBtn(label, bgColor, props)
         Text = label,
         TextColor3 = Color3.new(1, 1, 1),
         Font = Enum.Font.FredokaOne,
-        TextSize = props.TextSize or 28,
+        TextSize = props.TextSize or 12,
         TextStrokeTransparency = 0,
         TextStrokeColor3 = Color3.new(0,0,0),
         Name = props.Name or label,
-        MouseButton1Click = props.onActivated,
         AutoButtonColor = true,
-    }, children)
+    }
+    
+    if props.onActivated then
+        buttonProps[Roact.Event.Activated] = props.onActivated
+    end
+    
+    return el("TextButton", buttonProps, children)
 end
 
 local function menuBtn(label, bgColor, props)
@@ -95,7 +100,7 @@ local function menuBtn(label, bgColor, props)
         UICorner = el("UICorner", { CornerRadius = UDim.new(0, 16) }),
         UIStroke = el("UIStroke", {
             Color = Color3.new(0, 0, 0),
-            Thickness = 3,
+            Thickness = 1,
             ApplyStrokeMode = Enum.ApplyStrokeMode.Border,
         }),
     }
@@ -103,9 +108,9 @@ local function menuBtn(label, bgColor, props)
     if props.Icon then
         children.IconImage = el("ImageLabel", {
             BackgroundTransparency = 1,
-            Position = UDim2.new(0.5, 0, 0.4, 0),
+            Position = UDim2.new(0.5, 0, 0.3, 0),
             AnchorPoint = Vector2.new(0.5, 0.5),
-            Size = UDim2.new(0, 40, 0, 40),
+            Size = UDim2.new(0, 26, 0, 26),
             Image = props.Icon,
             ImageColor3 = Color3.new(1, 1, 1),
         })
@@ -115,8 +120,8 @@ local function menuBtn(label, bgColor, props)
         for k, v in pairs(props.Children) do children[k] = v end
     end
 
-    return el("TextButton", {
-        Size = props.Size or UDim2.new(0, 80, 0, 80),
+    local btnProps = {
+        Size = props.Size or UDim2.new(0, 42, 0, 42),
         Position = props.Position,
         AnchorPoint = props.AnchorPoint,
         LayoutOrder = props.LayoutOrder,
@@ -125,13 +130,18 @@ local function menuBtn(label, bgColor, props)
         Text = label,
         TextColor3 = Color3.new(1, 1, 1),
         Font = Enum.Font.FredokaOne,
-        TextSize = props.TextSize or 16,
+        TextSize = props.TextSize or 10,
         TextStrokeTransparency = 0.5,
         Name = props.Name or label,
-        MouseButton1Click = props.onActivated,
         TextYAlignment = Enum.TextYAlignment.Bottom,
         TextWrapped = true,
-    }, children)
+    }
+    
+    if props.onActivated then
+        btnProps[Roact.Event.Activated] = props.onActivated
+    end
+    
+    return el("TextButton", btnProps, children)
 end
 
 local function buildLeaderboard(state)
@@ -144,8 +154,9 @@ local function buildLeaderboard(state)
             end
             children["Row" .. i] = Roui.LeaderboardRow({
                 Rank = i,
-                Name = name:sub(1, 10),
+                Name = name:sub(1, 8),
                 Score = formatNumber(e.score or 0),
+                UserId = e.userId,
                 Highlight = (e.userId == Players.LocalPlayer.UserId),
                 LayoutOrder = i,
             })
@@ -153,19 +164,11 @@ local function buildLeaderboard(state)
     end
 
     children.UICorner = el("UICorner", { CornerRadius = UDim.new(0, 8) })
-    children.UIStroke = el("UIStroke", { Thickness = 3, Color = Color3.new(0,0,0) })
-    children.Title = el("Frame", {
-        Size = UDim2.new(1, 0, 0, 32),
-        BackgroundColor3 = Color3.fromRGB(60, 70, 120),
-        ZIndex = 2,
-    }, {
-        UICorner = el("UICorner", { CornerRadius = UDim.new(0, 8) }),
-        Text = Roui.Text({ Text = "排行榜", Size = UDim2.new(1, 0, 1, 0), TextSize = 16, Font = Enum.Font.FredokaOne }),
-    })
+    children.UIStroke = el("UIStroke", { Thickness = 1, Color = Color3.new(0,0,0) })
 
     return Roui.Leaderboard({
-        Position = UDim2.new(1, -200, 0, 20),
-        Size = UDim2.new(0, 180, 0, 300),
+        Position = UDim2.new(1, -90, 0, 10),
+        Size = UDim2.new(0, 75, 0, 100),
     }, children)
 end
 
@@ -193,28 +196,28 @@ local function NextGiftWidget(props)
     local canClaim = timeLeft <= 0
     
     return el("TextButton", {
-        Size = UDim2.new(0, 160, 0, 40),
+        Size = UDim2.new(0, 70, 0, 28),
         BackgroundColor3 = canClaim and Color3.fromRGB(100, 220, 100) or Color3.fromRGB(60, 60, 80),
         Text = "",
         AutoButtonColor = true,
         BorderSizePixel = 0,
         [Roact.Event.Activated] = onActivated,
     }, {
-        UICorner = el("UICorner", { CornerRadius = UDim.new(0, 8) }),
-        UIStroke = el("UIStroke", { Thickness = 2, Color = Color3.new(0,0,0) }),
+        UICorner = el("UICorner", { CornerRadius = UDim.new(0, 6) }),
+        UIStroke = el("UIStroke", { Thickness = 1, Color = Color3.new(0,0,0) }),
         Icon = el("ImageLabel", {
-            Size = UDim2.new(0, 24, 0, 24),
-            Position = UDim2.new(0, 8, 0.5, 0),
+            Size = UDim2.new(0, 14, 0, 14),
+            Position = UDim2.new(0, 3, 0.5, 0),
             AnchorPoint = Vector2.new(0, 0.5),
             BackgroundTransparency = 1,
             Image = "rbxassetid://6034261141",
             ZIndex = 2,
         }),
         Label = Roui.Text({
-            Text = canClaim and "CLAIM GIFT!" or ("Gift in " .. formatTime(timeLeft)),
-            Size = UDim2.new(1, -40, 1, 0),
-            Position = UDim2.new(0, 35, 0, 0),
-            TextSize = 16,
+            Text = canClaim and "GIFT!" or formatTime(timeLeft),
+            Size = UDim2.new(1, -20, 1, 0),
+            Position = UDim2.new(0, 20, 0, 0),
+            TextSize = 7,
             Font = Enum.Font.FredokaOne,
             TextXAlignment = Enum.TextXAlignment.Left,
             ZIndex = 2,
@@ -253,11 +256,11 @@ local function GiftPanel(props)
             BackgroundColor3 = itemBgColor,
             LayoutOrder = i,
         }, {
-            UICorner = el("UICorner", { CornerRadius = UDim.new(0, 10) }),
-            UIStroke = el("UIStroke", { Thickness = 2, Color = Color3.new(0,0,0) }),
+            UICorner = el("UICorner", { CornerRadius = UDim.new(0, 7) }),
+            UIStroke = el("UIStroke", { Thickness = 1, Color = Color3.new(0,0,0) }),
             Icon = el("ImageLabel", {
-                Size = UDim2.new(0, 45, 0, 45),
-                Position = UDim2.new(0.5, 0, 0.1, 0),
+                Size = UDim2.new(0, 24, 0, 24),
+                Position = UDim2.new(0.5, 0, 0.03, 0),
                 AnchorPoint = Vector2.new(0.5, 0),
                 BackgroundTransparency = 1,
                 Image = iconId,
@@ -265,21 +268,21 @@ local function GiftPanel(props)
             }),
             Amount = Roui.Text({
                 Text = "+" .. formatNumber(reward.amount),
-                Size = UDim2.new(1, 0, 0, 20),
-                Position = UDim2.new(0, 0, 0.5, 5),
-                TextSize = 16,
+                Size = UDim2.new(1, 0, 0, 12),
+                Position = UDim2.new(0, 0, 0.48, 1),
+                TextSize = 7,
                 Font = Enum.Font.FredokaOne,
                 ZIndex = 2,
             }),
             StatusBar = el("TextButton", {
-                Size = UDim2.new(0.9, 0, 0.22, 0),
+                Size = UDim2.new(0.7, 0, 0.22, 0),
                 Position = UDim2.new(0.5, 0, 0.92, 0),
                 AnchorPoint = Vector2.new(0.5, 1),
                 BackgroundColor3 = statusColor,
                 BorderSizePixel = 0,
                 Text = statusText,
                 Font = Enum.Font.FredokaOne,
-                TextSize = 14,
+                TextSize = 5,
                 TextColor3 = Color3.new(1,1,1),
                 AutoButtonColor = canClaim,
                 Active = true,
@@ -289,64 +292,65 @@ local function GiftPanel(props)
                     if onClaim then onClaim(i) end
                 end) or nil
             }, {
-                UICorner = el("UICorner", { CornerRadius = UDim.new(0, 6) }),
-                UIStroke = el("UIStroke", { Thickness = 1.5, Color = Color3.new(0,0,0) }),
+                UICorner = el("UICorner", { CornerRadius = UDim.new(0, 2) }),
+                UIStroke = el("UIStroke", { Thickness = 1, Color = Color3.new(0,0,0) }),
             })
         })
     end
     
     local gridChildren = listItems
     gridChildren.Layout = el("UIGridLayout", {
-        CellSize = UDim2.new(0, 110, 0, 115),
-        CellPadding = UDim2.new(0, 12, 0, 12),
+        CellSize = UDim2.new(0, 54, 0, 56),
+        CellPadding = UDim2.new(0, 3, 0, 3),
         SortOrder = Enum.SortOrder.LayoutOrder,
         HorizontalAlignment = Enum.HorizontalAlignment.Center,
         VerticalAlignment = Enum.VerticalAlignment.Center,
     })
     gridChildren.UICorner = el("UICorner", { CornerRadius = UDim.new(0, 12) })
-    gridChildren.UIStroke = el("UIStroke", { Thickness = 2, Color = Color3.new(0,0,0) })
+    gridChildren.UIStroke = el("UIStroke", { Thickness = 1, Color = Color3.new(0,0,0) })
 
     return Roui.Overlay({
         OnClose = onClose,
+        Transparency = 1,
     }, {
         Panel = el("Frame", {
-            Size = UDim2.new(0, 520, 0, 480),
-            Position = UDim2.new(0.5, 0, 0.5, 0),
+            Size = UDim2.new(0, 240, 0, 240),
+            Position = UDim2.new(0.5, 0, 0.35, 0),
             AnchorPoint = Vector2.new(0.5, 0.5),
             BackgroundColor3 = Color3.fromRGB(60, 180, 255),
             ZIndex = 101, -- 必须高于 Roui.Overlay 的 CloseOverlay (99)
         }, {
-            UICorner = el("UICorner", { CornerRadius = UDim.new(0, 16) }),
-            UIStroke = el("UIStroke", { Thickness = 4, Color = Color3.new(0,0,0) }),
+            UICorner = el("UICorner", { CornerRadius = UDim.new(0, 12) }),
+            UIStroke = el("UIStroke", { Thickness = 2, Color = Color3.new(0,0,0) }),
             TitleBar = el("Frame", {
-                Size = UDim2.new(1, 0, 0, 50),
+                Size = UDim2.new(1, 0, 0, 32),
                 BackgroundTransparency = 1,
             }, {
                 Title = Roui.Text({
                     Text = "GIFTS",
                     Size = UDim2.new(1, 0, 1, 0),
-                    TextSize = 36,
+                    TextSize = 20,
                     Font = Enum.Font.FredokaOne,
                 }),
                 CloseBtn = el("TextButton", {
                     Text = "X",
-                    Size = UDim2.new(0, 32, 0, 32),
-                    Position = UDim2.new(1, -10, 0.5, 0),
+                    Size = UDim2.new(0, 24, 0, 24),
+                    Position = UDim2.new(1, -8, 0.5, 0),
                     AnchorPoint = Vector2.new(1, 0.5),
                     BackgroundColor3 = Color3.fromRGB(220, 60, 60),
                     BorderSizePixel = 0,
                     Font = Enum.Font.FredokaOne,
-                    TextSize = 20,
+                    TextSize = 14,
                     TextColor3 = Color3.new(1,1,1),
                     [Roact.Event.Activated] = onClose,
                 }, {
-                    UICorner = el("UICorner", { CornerRadius = UDim.new(0, 6) }),
-                    UIStroke = el("UIStroke", { Thickness = 2, Color = Color3.new(0,0,0) }),
+                    UICorner = el("UICorner", { CornerRadius = UDim.new(0, 4) }),
+                    UIStroke = el("UIStroke", { Thickness = 1, Color = Color3.new(0,0,0) }),
                 }),
             }),
             GridContainer = el("Frame", {
-                Size = UDim2.new(1, -20, 1, -70),
-                Position = UDim2.new(0.5, 0, 0, 60),
+                Size = UDim2.new(1, -12, 1, -50),
+                Position = UDim2.new(0.5, 0, 0, 40),
                 AnchorPoint = Vector2.new(0.5, 0),
                 BackgroundColor3 = Color3.fromRGB(40, 120, 200),
                 BorderSizePixel = 0,
@@ -368,67 +372,72 @@ function SnakeGameUIRoot:render()
     local autoMode = state.autoMode or false
 
     local children = {}
+    
+    -- 不使用任何缩放，直接用固定像素
+    -- children.UIScale = el("UIScale", { Scale = uiScale })
 
     children.LeftContainer = el("Frame", {
-        Position = UDim2.new(0, 20, 0, 20),
-        Size = UDim2.new(0, 300, 0, 600),
+        Position = UDim2.new(0, 15, 0, 15),
+        Size = UDim2.new(0, 140, 0, 160), -- 更小
         BackgroundTransparency = 1,
     }, {
         UIListLayout = el("UIListLayout", {
-            Padding = UDim.new(0, 15),
+            Padding = UDim.new(0, 8),
             SortOrder = Enum.SortOrder.LayoutOrder,
             HorizontalAlignment = Enum.HorizontalAlignment.Left,
         }),
         
         -- Stats Container (Score + Money)
         StatsContainer = el("Frame", {
-            Size = UDim2.new(0, 260, 0, 130), -- Increased height to avoid overlap
+            Size = UDim2.new(0, 112, 0, 74),
             BackgroundTransparency = 1,
             LayoutOrder = 1,
         }, {
             UIListLayout = el("UIListLayout", {
-                Padding = UDim.new(0, 15), -- Increased padding
+                Padding = UDim.new(0, 8),
                 SortOrder = Enum.SortOrder.LayoutOrder,
             }),
             ScoreBar = Roui.StatBar({
                 BackgroundColor3 = Color3.fromRGB(60, 160, 255), -- Blue
                 Icon = "rbxassetid://89074978607958", -- Snake Icon
                 Value = formatNumber(score),
+                Size = UDim2.new(0, 112, 0, 32),
                 LayoutOrder = 1,
             }),
             MoneyBar = Roui.StatBar({
                 BackgroundColor3 = Color3.fromRGB(80, 220, 80), -- Green
                 Icon = "rbxassetid://105300168575798", -- Cash Stack
                 Value = formatNumber(money),
+                Size = UDim2.new(0, 112, 0, 32),
                 LayoutOrder = 2,
             }),
         }),
 
         -- Menu Buttons Grid
         MenuGrid = el("Frame", {
-            Size = UDim2.new(0, 160, 0, 240), -- 2 columns x 80px width
+            Size = UDim2.new(0, 95, 0, 95),
             BackgroundTransparency = 1,
             LayoutOrder = 2,
         }, {
             UIGridLayout = el("UIGridLayout", {
-                CellSize = UDim2.new(0, 70, 0, 70),
-                CellPadding = UDim2.new(0, 10, 0, 10),
+                CellSize = UDim2.new(0, 42, 0, 42),
+                CellPadding = UDim2.new(0, 5, 0, 5),
                 SortOrder = Enum.SortOrder.LayoutOrder,
             }),
             DailyBtn = menuBtn("Daily", Color3.fromRGB(247, 55, 92), { 
                 Name = "DailyButton", 
-                Icon = "rbxassetid://71479056537473", -- Daily Calendar
+                Icon = "rbxassetid://71479056537473",
                 onActivated = SnakeGameUI.Callbacks.onToggleGiftPanel,
                 LayoutOrder = 1
             }),
-            ShopBtn  = menuBtn("Shop", Color3.fromRGB(255, 180, 50),  { 
+            ShopBtn = menuBtn("Shop", Color3.fromRGB(255, 180, 50),  { 
                 Name = "ShopButton", 
-                Icon = "rbxassetid://118554800883386", -- Store
+                Icon = "rbxassetid://118554800883386",
                 LayoutOrder = 2 
             }),
-            SkinsBtn  = menuBtn("Skins", Color3.fromRGB(228, 139, 68), { 
+            SkinsBtn = menuBtn("Skins", Color3.fromRGB(228, 139, 68), { 
                 Name = "SkinButton", 
-                Icon = "rbxassetid://94001317361506", -- Inventory/Skins Box
+                Icon = "rbxassetid://94001317361506",
                 LayoutOrder = 3
             }),
         }),
@@ -437,8 +446,8 @@ function SnakeGameUIRoot:render()
     children.Leaderboard = buildLeaderboard(state)
 
     children.NextGiftWidgetCont = el("Frame", {
-        Position = UDim2.new(1, -200, 0, 330),
-        Size = UDim2.new(0, 180, 0, 50),
+        Position = UDim2.new(1, -85, 0, 115),
+        Size = UDim2.new(0, 75, 0, 30),
         BackgroundTransparency = 1,
     }, {
         Widget = NextGiftWidget({ 
@@ -448,37 +457,41 @@ function SnakeGameUIRoot:render()
     })
 
     children.BottomBar = el("Frame", {
-        Position = UDim2.new(0.5, 0, 1, -110),
+        Position = UDim2.new(0.5, 0, 1, -40),
         AnchorPoint = Vector2.new(0.5, 0.5),
-        Size = UDim2.new(0, 600, 0, 80), -- Increased width for action buttons
+        Size = UDim2.new(0, 240, 0, 36),
         BackgroundTransparency = 1,
     }, {
         UIListLayout = el("UIListLayout", {
             FillDirection = Enum.FillDirection.Horizontal,
             HorizontalAlignment = Enum.HorizontalAlignment.Center,
             VerticalAlignment = Enum.VerticalAlignment.Center,
-            Padding = UDim.new(0, 15), -- More spacing
+            Padding = UDim.new(0, 6),
             SortOrder = Enum.SortOrder.LayoutOrder,
         }),
         -- Button 1: 2x Speed (Boost) - Yellow
         BoostBtn = actionBtn("2x Speed", Color3.fromRGB(255, 200, 0), { 
             Name = "BoostButton",  
+            Size = UDim2.new(0, 52, 0, 32),
+            TextSize = 11,
             LayoutOrder = 1, 
-            onActivated = nil -- Add boost callback if available
+            onActivated = nil
         }),
         -- Button 2: Kill All (Bomb) - Red, Larger
         BombBtn = actionBtn("Kill All", Color3.fromRGB(255, 40, 40), { 
             Name = "BombButton",   
-            Size = UDim2.new(0, 150, 0, 60), -- Larger
-            TextSize = 34,
+            Size = UDim2.new(0, 62, 0, 36),
+            TextSize = 13,
             LayoutOrder = 2, 
-            onActivated = nil -- Add bomb callback if available
+            onActivated = nil
         }),
         -- Button 3: Magnet (Styled like 2x Size) - Blue
         MagnetBtn = actionBtn("Magnet", Color3.fromRGB(40, 160, 255), { 
             Name = "MagnetButton", 
+            Size = UDim2.new(0, 52, 0, 32),
+            TextSize = 11,
             LayoutOrder = 3, 
-            onActivated = nil -- Add magnet callback if available
+            onActivated = nil
         }),
         -- Button 4: Auto - Green/Red
         AutoBtn = actionBtn(
@@ -486,6 +499,8 @@ function SnakeGameUIRoot:render()
             autoMode and Color3.fromRGB(220, 80, 80) or Color3.fromRGB(80, 220, 80),
             { 
                 Name = "AutoButton", 
+                Size = UDim2.new(0, 52, 0, 32),
+                TextSize = 11,
                 LayoutOrder = 4, 
                 onActivated = SnakeGameUI.Callbacks.onAutoToggle 
             }

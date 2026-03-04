@@ -61,13 +61,13 @@ function SnakeGameController:KnitStart()
         print("[SnakeGameController] 切换抽奖面板，当前状态:", ClientState.showSpinPanel)
         ClientState.showSpinPanel = not ClientState.showSpinPanel
         print("[SnakeGameController] 新状态:", ClientState.showSpinPanel)
-        SpinWheelUI.Update(ClientState)
+        -- SpinWheelUI.Update(ClientState)
     end
 
     -- 抽奖相关回调
     SpinWheelUI.Callbacks.onClose = function()
         ClientState.showSpinPanel = false
-        SnakeGameUI.Update(ClientState)
+        -- 【临时禁用】SnakeGameUI.Update(ClientState)
     end
 
     SpinWheelUI.Callbacks.onSpin = function(callback)
@@ -109,7 +109,7 @@ function SnakeGameController:KnitStart()
                     print("[Gift] 领取成功: " .. index)
                     -- 等待一下，让服务器发送 GiftUpdate 信号
                     task.wait(0.3)
-                    SnakeGameUI.Update(ClientState)
+                    -- 【临时禁用】SnakeGameUI.Update(ClientState)
                 else
                     warn("[Gift] 服务器返回领取失败: " .. tostring(msg or "原因未知"))
                 end
@@ -202,7 +202,7 @@ function SnakeGameController:KnitStart()
     if SnakeGameService.MoneyChanged then
         SnakeGameService.MoneyChanged:Connect(function(money)
             ClientState.money = money
-            SnakeGameUI.Update(ClientState)
+            -- 【临时禁用】SnakeGameUI.Update(ClientState)
         end)
     end
     
@@ -210,7 +210,7 @@ function SnakeGameController:KnitStart()
     if SnakeGameService.GiftUpdate then
         SnakeGameService.GiftUpdate:Connect(function(data)
             ClientState.giftData = data
-            SnakeGameUI.Update(ClientState)
+            -- 【临时禁用】SnakeGameUI.Update(ClientState)
         end)
     end
     
@@ -218,7 +218,7 @@ function SnakeGameController:KnitStart()
     if SnakeGameService.SpinsChanged then
         SnakeGameService.SpinsChanged:Connect(function(spinsLeft)
             ClientState.spins = spinsLeft or 0
-            SpinWheelUI.Update(ClientState)
+            -- SpinWheelUI.Update(ClientState)
             print("[SnakeGameController] 抽奖次数已更新: " .. tostring(ClientState.spins))
         end)
     end
@@ -231,7 +231,7 @@ function SnakeGameController:KnitStart()
         end)
         if successGift and giftData then
             ClientState.giftData = giftData
-            SnakeGameUI.Update(ClientState)
+            -- 【临时禁用】SnakeGameUI.Update(ClientState)
         end
 
         -- 获取抽奖次数将通过 SpinsChanged 信号在线获取，初始为 0
@@ -272,7 +272,7 @@ function SnakeGameController:KnitStart()
                     end
                 end
 
-                SnakeGameUI.Update(ClientState)
+                -- 【临时禁用】SnakeGameUI.Update(ClientState)
                 break
             else
                 print("[SnakeGameController] 获取初始状态失败 (第" .. i .. "次)，1秒后重试...")
@@ -288,7 +288,7 @@ function SnakeGameController:KnitStart()
         if isAutoMode then
              isAutoMode = false
              ClientState.autoMode = false
-             SnakeGameUI.Update(ClientState)
+             -- 【临时禁用】SnakeGameUI.Update(ClientState)
              print("[SnakeGameController] 用户操作，自动模式关闭")
         end
 
@@ -341,17 +341,99 @@ function SnakeGameController:KnitStart()
         end
     end)
 
+    -- 手机触摸摇杆输入 - 连续方向向量
+    local touchStartPos = nil
+    local touchMoving = false
+    local touchCurrentPos = nil
+    
+    UserInputService.TouchStarted:Connect(function(touchInput, processed)
+        touchStartPos = touchInput.Position
+        touchCurrentPos = touchInput.Position
+        touchMoving = true
+        print("[Touch] TouchStarted at:", touchStartPos)
+    end)
+    
+    UserInputService.TouchMoved:Connect(function(touchInput, processed)
+        if not touchMoving or not touchStartPos then return end
+        
+        touchCurrentPos = touchInput.Position
+        local delta = touchCurrentPos - touchStartPos
+        local distance = delta.Magnitude
+        
+        -- 死区：距离太小则忽略
+        if distance < 10 then return end
+        
+        -- 直接计算连续的方向向量（不再用 WASD 离散按键）
+        -- Y 轴反转（Roblox 屏幕坐标中 Y 向下为正）
+        local dirX = delta.X
+        local dirY = -delta.Y
+        
+        -- 标准化向量，使其最大长度为 1
+        local maxDist = 100 -- 摇杆的有效范围
+        local normalizedX = math.clamp(dirX / maxDist, -1, 1)
+        local normalizedY = math.clamp(dirY / maxDist, -1, 1)
+        
+        -- 创建连续的方向向量
+        local vecMagnitude = math.sqrt(normalizedX * normalizedX + normalizedY * normalizedY)
+        if vecMagnitude > 0.1 then
+            -- 关闭自动模式
+            if isAutoMode then
+                isAutoMode = false
+                ClientState.autoMode = false
+                SnakeGameUI.Update(ClientState)
+                print("[SnakeGameController] 用户操作，自动模式关闭")
+            end
+            
+            -- 使用归一化的 X、Y 来计算方向，支持任意角度
+            local cam = Workspace.CurrentCamera
+            if cam then
+                local look = cam.CFrame.LookVector
+                local right = cam.CFrame.RightVector
+                local flatForward = Vector3.new(look.X, 0, look.Z).Unit
+                local flatRight   = Vector3.new(right.X, 0, right.Z).Unit
+                local combined = flatForward * normalizedY + flatRight * normalizedX
+                if combined.Magnitude > 0.01 then
+                    local dir = combined.Unit
+                    SnakeGame3DView.UpdateSnakeDirection(tostring(Players.LocalPlayer.UserId), dir, true)
+                    pcall(function() SnakeGameService:ChangeDirection(dir) end)
+                end
+            else
+                -- 没有摄像机时的直接计算
+                local dir = Vector3.new(normalizedX, 0, -normalizedY)
+                if dir.Magnitude > 0.01 then
+                    dir = dir.Unit
+                    SnakeGame3DView.UpdateSnakeDirection(tostring(Players.LocalPlayer.UserId), dir, true)
+                    pcall(function() SnakeGameService:ChangeDirection(dir) end)
+                end
+            end
+        end
+    end)
+    
+    UserInputService.TouchEnded:Connect(function(touchInput, processed)
+        if touchMoving then
+            print("[Touch] TouchEnded")
+        end
+        touchMoving = false
+        touchStartPos = nil
+        touchCurrentPos = nil
+        SnakeGame3DView.UpdateSnakeDirection(tostring(Players.LocalPlayer.UserId), Vector3.new(0, 0, 0), false)
+        pcall(function() SnakeGameService:ChangeDirection(Vector3.new(0, 0, 0)) end)
+    end)
+
     -- 8. 自动寻路 & 计时器 Loop
     local tickTimer = 0
+    local lastGiftTime = 0
     RunService.Heartbeat:Connect(function(dt)
-        -- A. 礼物计时器逻辑 (本地预测增加时间，但不刷新 UI，只在服务器信号时更新)
+        -- A. 礼物计时器逻辑 (更新数据，少频率刷新 UI)
         if ClientState.giftData then
             tickTimer = tickTimer + dt
             if tickTimer >= 1.0 then
                 tickTimer = tickTimer - 1.0
                 ClientState.giftData.timePlayed = (ClientState.giftData.timePlayed or 0) + 1
-                -- 每秒刷新 UI 以更新倒计时
-                SnakeGameUI.Update(ClientState)
+                -- 只在礼物面板打开时刷新 UI
+                if ClientState.showGiftPanel then
+                    SnakeGameUI.Update(ClientState)
+                end
             end
         end
 

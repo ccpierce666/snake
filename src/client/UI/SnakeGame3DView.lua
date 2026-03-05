@@ -232,19 +232,21 @@ local function createSnakeLengthLabel(userId)
 end
 
 local function calculateBodySize(currentLength)
-    -- 对应 UPDATE_LOG.md 的四个阶段
     if currentLength < 100 then
-        -- 0-100: 3x growth (0.6 -> 1.8)
-        return 0.6 + (currentLength / 100) * 1.2
+        -- 0-100: 2x growth (0.6 -> 1.2)
+        return 0.6 + (currentLength / 100) * 0.6
     elseif currentLength < 1000 then
-        -- 100-1000: 2x growth (1.8 -> 3.6)
-        return 1.8 + ((currentLength - 100) / 900) * 1.8
+        -- 100-1000: (1.2 -> 1.5)
+        return 1.2 + ((currentLength - 100) / 900) * 0.3
     elseif currentLength < 10000 then
-        -- 1000-10000: Slow growth (3.6 -> 6.0)
-        return 3.6 + ((currentLength - 1000) / 9000) * 2.4
+        -- 1000-10000: (1.5 -> 2.0)
+        return 1.5 + ((currentLength - 1000) / 9000) * 0.5
+    elseif currentLength < 100000 then
+        -- 10000-100000: (2.0 -> 2.7)
+        return 2.0 + ((currentLength - 10000) / 90000) * 0.7
     else
-        -- 10000+: Cap at 8.0
-        return math.min(8.0, 6.0 + ((currentLength - 10000) / 90000) * 2.0)
+        -- 100000-1000000: (2.7 -> 3.6)
+        return math.min(3.6, 2.7 + ((currentLength - 100000) / 900000) * 0.9)
     end
 end
 
@@ -469,21 +471,20 @@ function SnakeGame3DView.Init()
         snakePositions = {}
         local snakeHeads = {} -- [snakePositions index] = userId (for name label positioning)
 
-        local function addSnakeRenderPoints(body, isLocal, bodySize, userId)
+        local function addSnakeRenderPoints(body, isLocal, bodySize, userId, snakeColor)
             if not body or #body == 0 then return end
 
-            -- 客户端强制边界限制 (视觉修正，防止穿墙)
-            -- 围墙位置 240, 头部半径 bodySize * 0.75
             local visualRadius = bodySize * 0.75
-            local limit = 240 - visualRadius - 0.2 -- 与服务器逻辑对齐 (留 0.2 缓冲)
+            local limit = 240 - visualRadius - 0.2
             body[1] = Vector3.new(math.clamp(body[1].X, -limit, limit), 0, math.clamp(body[1].Z, -limit, limit))
 
             local spacing = bodySize * 0.6
+            local baseColor = snakeColor or Color3.fromRGB(255, 180, 80)
 
             table.insert(snakePositions, {
                 pos = body[1],
                 isHead = true,
-                color = isLocal and Color3.fromRGB(255, 100, 100) or Color3.fromRGB(100, 100, 255),
+                color = baseColor,
             })
             table.insert(snakeHeads, userId)
 
@@ -504,9 +505,9 @@ function SnakeGame3DView.Init()
                     table.insert(snakePositions, {
                         pos = pos,
                         isHead = false,
-                        color = isLocal and Color3.fromRGB(100, 220, 100) or Color3.fromRGB(50, 50, 200),
+                        color = baseColor,
                     })
-                    table.insert(snakeHeads, nil) -- non-head parts don't have userId
+                    table.insert(snakeHeads, nil)
                 end
             end
         end
@@ -515,12 +516,12 @@ function SnakeGame3DView.Init()
         local bodySize = calculateBodySize(currentLength)
 
         if localPlayerSnakeState then
-            addSnakeRenderPoints(localPlayerSnakeState.body, true, bodySize, tostring(Players.LocalPlayer.UserId))
+            addSnakeRenderPoints(localPlayerSnakeState.body, true, bodySize, tostring(Players.LocalPlayer.UserId), localPlayerSnakeState.color)
         end
 
         for userId, s in pairs(otherSnakes) do
             local otherBodySize = calculateBodySize(s.displayLength or #s.body)
-            addSnakeRenderPoints(s.body, false, otherBodySize, userId)
+            addSnakeRenderPoints(s.body, false, otherBodySize, userId, s.color)
         end
 
         local needed = #snakePositions
@@ -544,9 +545,9 @@ function SnakeGame3DView.Init()
         for i = 1, #snakeParts do
             if i <= needed and snakePositions[i] then
                 local pos = snakePositions[i]
-                snakeParts[i].Position = pos.pos + Vector3.new(0, 0.4, 0)
+                snakeParts[i].Position = pos.pos + Vector3.new(0, 0, 0)
                 local isHead = pos.isHead
-                snakeParts[i].Color = isHead and SNAKE_HEAD_COLOR or SNAKE_BODY_COLOR
+                snakeParts[i].Color = pos.color or SNAKE_BODY_COLOR
                 local sz = isHead and (bodySize * 1.5) or bodySize
                 snakeParts[i].Size = Vector3.new(sz, sz, sz)
                 snakeParts[i].Transparency = 0
@@ -612,7 +613,7 @@ function SnakeGame3DView.Init()
                 local headPos = localPlayerSnakeState.body[1]
                 if headPos then
                     local anchor = getOrCreateAnchorPart(localUserId)
-                    anchor.Position = Vector3.new(headPos.X, 0.4, headPos.Z)
+                    anchor.Position = Vector3.new(headPos.X, 0, headPos.Z)
                     localLabel.Adornee = anchor
                     if localLabel.MaxDistance == 0 then
                         localLabel.MaxDistance = 500
@@ -667,7 +668,7 @@ function SnakeGame3DView.Init()
                         local headPos = otherSnakes[userId].body[1]
                         if headPos then
                             local anchor = getOrCreateAnchorPart(userId)
-                            anchor.Position = Vector3.new(headPos.X, 0.4, headPos.Z)
+                            anchor.Position = Vector3.new(headPos.X, 0, headPos.Z)
                             label.Adornee = anchor
                             if label.MaxDistance == 0 then
                                 label.MaxDistance = 500
@@ -822,8 +823,9 @@ function SnakeGame3DView.SpawnSnake(userId, body, color)
             isMoving = false,
             growQueue = 0,
             alive = true,
-            logicalLength = #body,  -- 初始化为身体长度
-            displayLength = #body   -- 初始化身体放大倍数
+            logicalLength = 0,
+            displayLength = 0,
+            color = color or Color3.fromRGB(255, 210, 60),
         }
     else
         local p = Players:GetPlayerByUserId(tonumber(userId))
@@ -839,9 +841,10 @@ function SnakeGame3DView.SpawnSnake(userId, body, color)
             isMoving = false,
             alive = true,
             userId = userId,
-            playerName = playerName,  -- 记录玩家名字
-            logicalLength = #body,  -- 初始化为身体长度
-            displayLength = #body   -- 初始化身体放大倍数
+            playerName = playerName,
+            logicalLength = 0,
+            displayLength = 0,
+            color = color or Color3.fromRGB(200, 200, 200),
         }
         
         -- 为其他玩家的蛇创建虚线圈
@@ -914,9 +917,10 @@ function SnakeGame3DView.UpdateSnakeData(userId, data)
         -- 同步身体放大倍数（displayLength）
         if data.displayLength then
             snake.displayLength = data.displayLength
-            print("[3DView] 玩家 " .. userId .. " displayLength 更新: " .. data.displayLength)
         end
-        -- 核心修复：同步服务器的身体节数，确保生长后长度增加
+        if data.color then
+            snake.color = data.color
+        end
         if data.body then
             if userId ~= localUserId then
                 print("[3DView] 玩家 " .. userId .. " 身体数据更新: 旧长度=" .. #snake.body .. ", 新长度=" .. #data.body)
@@ -984,7 +988,7 @@ function SnakeGame3DView.UpdateFood(foodList)
         elseif value == 4 then size = 1.2; color = Color3.fromRGB(255, 200, 0)
         elseif value == 3 then size = 0.9; color = Color3.fromRGB(255, 255, 0)
         elseif value == 2 then size = 0.7; color = Color3.fromRGB(255, 150, 200) -- Pink
-        else size = 0.6; color = Color3.fromRGB(255, 255, 255) -- White
+        else size = 1.2; color = Color3.fromRGB(255, 255, 255) -- White
         end
 
         if not part then

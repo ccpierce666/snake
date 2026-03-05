@@ -120,25 +120,15 @@ function SnakeGameController:KnitStart()
     end
     
     -- 死亡面板回调
-    SnakeGameUI.Callbacks.onRespawn = function()
+    local function doRespawn()
         ClientState.isDead = false
         SnakeGameUI.Update(ClientState)
-        pcall(function() SnakeGameService:RequestRespawn(Players.LocalPlayer) end)
+        pcall(function() SnakeGameService:RequestRespawn() end)
     end
-    
-    SnakeGameUI.Callbacks.onRevive = function()
-        -- 复活消耗金钱或钻石（暂未实现具体消耗），直接复活
-        ClientState.isDead = false
-        SnakeGameUI.Update(ClientState)
-        pcall(function() SnakeGameService:RequestRespawn(Players.LocalPlayer) end)
-    end
-    
-    SnakeGameUI.Callbacks.onRevenge = function()
-        -- 复仇：立即复活并继续游戏
-        ClientState.isDead = false
-        SnakeGameUI.Update(ClientState)
-        pcall(function() SnakeGameService:RequestRespawn(Players.LocalPlayer) end)
-    end
+
+    SnakeGameUI.Callbacks.onRespawn = doRespawn
+    SnakeGameUI.Callbacks.onRevive  = doRespawn
+    SnakeGameUI.Callbacks.onRevenge = doRespawn
 
     -- 3. 初始化 UI 和 3D 视图
     SnakeGameUI.Start()
@@ -202,7 +192,10 @@ function SnakeGameController:KnitStart()
                 end
             end
 
-            SnakeGameUI.Update(ClientState)
+            -- 死亡面板显示时不刷新 UI，防止打断 Respawn 按钮点击
+            if not ClientState.isDead then
+                SnakeGameUI.Update(ClientState)
+            end
         end)
     end
 
@@ -372,50 +365,40 @@ function SnakeGameController:KnitStart()
         end
     end)
 
-    -- 手机触摸摇杆输入 - 连续方向向量
+    -- 手机触摸摇杆输入 - 用触摸ID追踪摇杆手指，防止多指干扰
+    local joystickTouchId = nil  -- 当前摇杆绑定的触摸ID
     local touchStartPos = nil
     local touchMoving = false
-    local touchCurrentPos = nil
-    
+
     UserInputService.TouchStarted:Connect(function(touchInput, processed)
+        -- 已经有摇杆手指了，忽略其他手指
+        if joystickTouchId ~= nil then return end
+        joystickTouchId = touchInput
         touchStartPos = touchInput.Position
-        touchCurrentPos = touchInput.Position
         touchMoving = true
-        print("[Touch] TouchStarted at:", touchStartPos)
     end)
-    
+
     UserInputService.TouchMoved:Connect(function(touchInput, processed)
-        if not touchMoving or not touchStartPos then return end
-        
-        touchCurrentPos = touchInput.Position
-        local delta = touchCurrentPos - touchStartPos
+        -- 只响应摇杆手指的移动
+        if touchInput ~= joystickTouchId or not touchStartPos then return end
+
+        local delta = touchInput.Position - touchStartPos
         local distance = delta.Magnitude
-        
-        -- 死区：距离太小则忽略
+
         if distance < 10 then return end
-        
-        -- 直接计算连续的方向向量（不再用 WASD 离散按键）
-        -- Y 轴反转（Roblox 屏幕坐标中 Y 向下为正）
-        local dirX = delta.X
-        local dirY = -delta.Y
-        
-        -- 标准化向量，使其最大长度为 1
-        local maxDist = 100 -- 摇杆的有效范围
-        local normalizedX = math.clamp(dirX / maxDist, -1, 1)
-        local normalizedY = math.clamp(dirY / maxDist, -1, 1)
-        
-        -- 创建连续的方向向量
+
+        local maxDist = 100
+        local normalizedX = math.clamp(delta.X / maxDist, -1, 1)
+        local normalizedY = math.clamp(-delta.Y / maxDist, -1, 1)
+
         local vecMagnitude = math.sqrt(normalizedX * normalizedX + normalizedY * normalizedY)
         if vecMagnitude > 0.1 then
-            -- 关闭自动模式
             if isAutoMode then
                 isAutoMode = false
                 ClientState.autoMode = false
                 SnakeGameUI.Update(ClientState)
-                print("[SnakeGameController] 用户操作，自动模式关闭")
             end
-            
-            -- 使用归一化的 X、Y 来计算方向，支持任意角度
+
             local cam = Workspace.CurrentCamera
             if cam then
                 local look = cam.CFrame.LookVector
@@ -429,7 +412,6 @@ function SnakeGameController:KnitStart()
                     pcall(function() SnakeGameService:ChangeDirection(dir) end)
                 end
             else
-                -- 没有摄像机时的直接计算
                 local dir = Vector3.new(normalizedX, 0, -normalizedY)
                 if dir.Magnitude > 0.01 then
                     dir = dir.Unit
@@ -439,14 +421,13 @@ function SnakeGameController:KnitStart()
             end
         end
     end)
-    
+
     UserInputService.TouchEnded:Connect(function(touchInput, processed)
-        if touchMoving then
-            print("[Touch] TouchEnded")
-        end
-        touchMoving = false
+        -- 只有摇杆手指抬起才停止移动
+        if touchInput ~= joystickTouchId then return end
+        joystickTouchId = nil
         touchStartPos = nil
-        touchCurrentPos = nil
+        touchMoving = false
         SnakeGame3DView.UpdateSnakeDirection(tostring(Players.LocalPlayer.UserId), Vector3.new(0, 0, 0), false)
         pcall(function() SnakeGameService:ChangeDirection(Vector3.new(0, 0, 0)) end)
     end)

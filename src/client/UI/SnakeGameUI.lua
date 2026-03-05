@@ -108,7 +108,7 @@ local function menuBtn(label, bgColor, props)
     if props.Icon then
         children.IconImage = el("ImageLabel", {
             BackgroundTransparency = 1,
-            Position = UDim2.new(0.5, 0, 0.3, 0),
+            Position = UDim2.new(0.5, 0, 0.5, 0),
             AnchorPoint = Vector2.new(0.5, 0.5),
             Size = UDim2.new(0, 26, 0, 26),
             Image = props.Icon,
@@ -146,15 +146,22 @@ end
 
 local function buildLeaderboard(state)
     local children = {}
+    children.UIListLayout = el("UIListLayout", {
+        FillDirection = Enum.FillDirection.Vertical,
+        HorizontalAlignment = Enum.HorizontalAlignment.Center,
+        SortOrder = Enum.SortOrder.LayoutOrder,
+        Padding = UDim.new(0, 2),
+    })
+
     for i, e in ipairs(state.leaderboard or {}) do
-        if i <= 10 then
+        if i <= 4 then
             local name = "Player"
             for _, p in ipairs(Players:GetPlayers()) do
                 if p.UserId == e.userId then name = p.Name break end
             end
             children["Row" .. i] = Roui.LeaderboardRow({
                 Rank = i,
-                Name = name:sub(1, 8),
+                Name = name:sub(1, 10),
                 Score = formatNumber(e.score or 0),
                 UserId = e.userId,
                 Highlight = (e.userId == Players.LocalPlayer.UserId),
@@ -163,12 +170,9 @@ local function buildLeaderboard(state)
         end
     end
 
-    children.UICorner = el("UICorner", { CornerRadius = UDim.new(0, 8) })
-    children.UIStroke = el("UIStroke", { Thickness = 1, Color = Color3.new(0,0,0) })
-
     return Roui.Leaderboard({
-        Position = UDim2.new(1, -90, 0, 10),
-        Size = UDim2.new(0, 75, 0, 100),
+        Position = UDim2.new(1, -160, 0, -34),
+        Size = UDim2.new(0, 152, 0, 100),
     }, children)
 end
 
@@ -236,14 +240,16 @@ local function DeathPanel(props)
     local onRespawn = props.onRespawn
     local onRevive = props.onRevive
     local onRevenge = props.onRevenge
-    
-    return Roui.Overlay({
-        OnClose = onRespawn,
-        Transparency = 0.7,
+
+    -- 无遮罩层，直接居中显示面板
+    return el("Frame", {
+        Size = UDim2.new(1, 0, 1, 0),
+        BackgroundTransparency = 1,
+        ZIndex = 100,
     }, {
         Panel = el("Frame", {
             Size = UDim2.new(0, 400, 0, 300),
-            Position = UDim2.new(0.5, 0, 0.5, 0),
+            Position = UDim2.new(0.5, 0, 0.35, 0),
             AnchorPoint = Vector2.new(0.5, 0.5),
             BackgroundColor3 = Color3.fromRGB(40, 40, 50),
             ZIndex = 101,
@@ -545,48 +551,23 @@ function SnakeGameUIRoot:render()
             }),
         }),
 
-        -- Menu Buttons Grid
+        -- Menu Buttons Grid (hidden)
         MenuGrid = el("Frame", {
-            Size = UDim2.new(0, 95, 0, 95),
+            Size = UDim2.new(0, 0, 0, 0),
             BackgroundTransparency = 1,
+            Visible = false,
             LayoutOrder = 2,
-        }, {
-            UIGridLayout = el("UIGridLayout", {
-                CellSize = UDim2.new(0, 42, 0, 42),
-                CellPadding = UDim2.new(0, 5, 0, 5),
-                SortOrder = Enum.SortOrder.LayoutOrder,
-            }),
-            DailyBtn = menuBtn("Daily", Color3.fromRGB(247, 55, 92), { 
-                Name = "DailyButton", 
-                Icon = "rbxassetid://71479056537473",
-                onActivated = SnakeGameUI.Callbacks.onToggleGiftPanel,
-                LayoutOrder = 1
-            }),
-            ShopBtn = menuBtn("Shop", Color3.fromRGB(255, 180, 50),  { 
-                Name = "ShopButton", 
-                Icon = "rbxassetid://118554800883386",
-                LayoutOrder = 2 
-            }),
-            SkinsBtn = menuBtn("Skins", Color3.fromRGB(228, 139, 68), { 
-                Name = "SkinButton", 
-                Icon = "rbxassetid://94001317361506",
-                LayoutOrder = 3
-            }),
-        }),
+        }, {}),
     })
 
     children.Leaderboard = buildLeaderboard(state)
 
+    -- Gift widget hidden
     children.NextGiftWidgetCont = el("Frame", {
-        Position = UDim2.new(1, -155, 0, 115),
-        Size = UDim2.new(0, 145, 0, 40),
+        Size = UDim2.new(0, 0, 0, 0),
         BackgroundTransparency = 1,
-    }, {
-        Widget = NextGiftWidget({ 
-            giftData = giftData,
-            onActivated = SnakeGameUI.Callbacks.onToggleGiftPanel 
-        })
-    })
+        Visible = false,
+    }, {})
 
     children.BottomBar = el("Frame", {
         Position = UDim2.new(0.5, 0, 1, -40),
@@ -691,19 +672,20 @@ end
 
 function SnakeGameUI.Update(state)
     if not gui then return end
-    if contentHandle and typeof(contentHandle) == "Instance" then
-        pcall(function() contentHandle:Destroy() end)
+    if contentHandle then
+        pcall(function() Roact.unmount(contentHandle) end)
+        contentHandle = nil
     end
-    contentHandle = nil
-    local success, result = pcall(function()
+    local ok, result = pcall(function()
         return Roact.mount(Roact.createElement(SnakeGameUIRoot, { state = state or {} }), gui)
     end)
-    if success and result then contentHandle = result else warn("[SnakeGameUI] Update Failed:", tostring(result)) end
+    if ok and result then contentHandle = result else warn("[SnakeGameUI] Update Failed:", tostring(result)) end
 end
 
 function SnakeGameUI.Stop()
-    if contentHandle then pcall(function() contentHandle:Destroy() end) end
+    if contentHandle then pcall(function() Roact.unmount(contentHandle) end) end
     if gui then pcall(function() gui:Destroy() end) end
+    contentHandle = nil
 end
 
 return SnakeGameUI

@@ -53,7 +53,27 @@ local LEADERBOARD_UPDATE_INTERVAL = 3 -- 每3帧更新一次排行榜
 local playerMoney = {}
 local playerSpins = {}
 local playerDailyGifts = {}
-local playerFoodCounts = {} -- 用于记录吃食物数量，实现 2:1 金钱逻辑
+local playerFoodCounts = {} -- 用于记录吃食物数量
+local playerSkinColors = {} -- [userId] = Color3，玩家专属初始颜色
+
+-- 皮肤颜色池：黄、白、蓝、橙、红
+local SKIN_COLOR_POOL = {
+    Color3.fromRGB(255, 210, 60),  -- 黄
+    Color3.fromRGB(240, 240, 240), -- 白
+    Color3.fromRGB(80, 160, 255),  -- 蓝
+    Color3.fromRGB(255, 140, 40),  -- 橙
+    Color3.fromRGB(255, 70, 70),   -- 红
+}
+local skinColorIndex = 0
+
+local function assignSkinColor(userId)
+    local uid = tostring(userId)
+    if not playerSkinColors[uid] then
+        skinColorIndex = (skinColorIndex % #SKIN_COLOR_POOL) + 1
+        playerSkinColors[uid] = SKIN_COLOR_POOL[skinColorIndex]
+    end
+    return playerSkinColors[uid]
+end
 
 -- 奖励配置
 local GIFT_REWARDS = {
@@ -118,17 +138,15 @@ end
 -- 用于计算视觉大小，与客户端保持一致
 local function calculateVisualBodySize(score)
     if score < 100 then
-        -- 0-100: 3x growth (0.6 -> 1.8)
-        return 0.6 + (score / 100) * 1.2
+        return 0.6 + (score / 100) * 0.6                              -- 0.6 -> 1.2
     elseif score < 1000 then
-        -- 100-1000: 2x growth (1.8 -> 3.6)
-        return 1.8 + ((score - 100) / 900) * 1.8
+        return 1.2 + ((score - 100) / 900) * 0.3                     -- 1.2 -> 1.5
     elseif score < 10000 then
-        -- 1000-10000: Slow growth (3.6 -> 6.0)
-        return 3.6 + ((score - 1000) / 9000) * 2.4
+        return 1.5 + ((score - 1000) / 9000) * 0.5                   -- 1.5 -> 2.0
+    elseif score < 100000 then
+        return 2.0 + ((score - 10000) / 90000) * 0.7                 -- 2.0 -> 2.7
     else
-        -- 10000+: Cap at 8.0
-        return math.min(8.0, 6.0 + ((score - 10000) / 90000) * 2.0)
+        return math.min(3.6, 2.7 + ((score - 100000) / 900000) * 0.9) -- 2.7 -> 3.6
     end
 end
 
@@ -289,7 +307,7 @@ function SnakeGameService:RequestRespawn(player)
         pendingGrowthScore = 0,
         displayLength = INITIAL_LENGTH
     }
-    SnakeSpawnedSignal:Fire(player.UserId, body, Color3.new(math.random(), math.random(), math.random()))
+    SnakeSpawnedSignal:Fire(player.UserId, body, assignSkinColor(player.UserId))
     
     -- 玩家重生时也发送排行榜更新
     local state = self:GetGameState()
@@ -349,7 +367,8 @@ function SnakeGameService:GetGameState()
         state.snakes[tostring(uid)] = {
             body = s.body, direction = s.direction, isMoving = s.isMoving,
             score = s.score, alive = s.alive,
-            displayLength = s.displayLength or #s.body  -- 身体放大倍数数据
+            displayLength = s.displayLength or #s.body,
+            color = playerSkinColors[tostring(uid)],
         }
     end
     return state
@@ -448,7 +467,8 @@ local function getGameStatePrivate()
         state.snakes[tostring(uid)] = {
             body = s.body, direction = s.direction, isMoving = s.isMoving,
             score = s.score, alive = s.alive,
-            displayLength = s.displayLength or #s.body  -- 身体放大倍数数据
+            displayLength = s.displayLength or #s.body,
+            color = playerSkinColors[tostring(uid)],
         }
     end
     return state
@@ -485,14 +505,11 @@ local function moveSnakes()
                     local growth = FOOD_GROWTH_MAP[f.value or 1] or 2
                     SnakeGameService:AddSnakeLength(pid, growth)
                     
-                    -- 修改金钱获取逻辑：每吃 2 个食物获得 1 金钱 (2:1)
+                    -- 每吃 1 个食物获得 1 金钱 (1:1)
                     local uid = tostring(pid)
-                    playerFoodCounts[uid] = (playerFoodCounts[uid] or 0) + 1
-                    if playerFoodCounts[uid] % 2 == 0 then
-                        playerMoney[uid] = (playerMoney[uid] or 0) + 1
-                        local p = Players:GetPlayerByUserId(tonumber(pid))
-                        if p then MoneyChangedSignal:FireTo(p, playerMoney[uid]) end
-                    end
+                    playerMoney[uid] = (playerMoney[uid] or 0) + 1
+                    local p = Players:GetPlayerByUserId(tonumber(pid))
+                    if p then MoneyChangedSignal:FireTo(p, playerMoney[uid]) end
                     
                     table.remove(food, i)
                     foodEaten = true
@@ -624,7 +641,7 @@ function SnakeGameService:KnitInit()
         -- 核心修复：确保角色重生时也能隐藏
         p.CharacterAdded:Connect(function()
             task.wait(0.5)
-            SnakeSpawnedSignal:Fire(p.UserId, snakes[p.UserId].body, Color3.new(1,1,1))
+            SnakeSpawnedSignal:Fire(p.UserId, snakes[p.UserId].body, assignSkinColor(p.UserId))
         end)
     end)
     

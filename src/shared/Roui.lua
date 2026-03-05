@@ -95,7 +95,7 @@ function Roui.StatBar(props)
         iconContent = el("ImageLabel", {
             Position = UDim2.new(0, 4, 0.5, 0),
             AnchorPoint = Vector2.new(0, 0.5),
-            Size = UDim2.new(0, 24, 0, 24),
+            Size = UDim2.new(0, 32, 0, 32),
             BackgroundTransparency = 1,
             Image = props.Icon,
         })
@@ -241,96 +241,103 @@ function Roui.LevelBadge(props)
     })
 end
 
--- LeaderboardRow component (Updated style)
+-- LeaderboardRow component (white bar style)
 function Roui.LeaderboardRow(props)
-    props = mergeProps(props, {
-        Size = UDim2.new(1, 0, 0, 18),
-        BackgroundTransparency = 1,
-        LayoutOrder = props.Rank or 0,
-    })
-    local isTop = (props.Rank or 1) <= 3
-    local bgColor = props.Highlight and Color3.fromRGB(100, 200, 100) or Color3.fromRGB(50, 60, 80)
-    if isTop and not props.Highlight then
-        bgColor = Color3.fromRGB(255, 200, 50) -- Gold for top 3
-    end
-    
-    local children = {
-        Background = el("Frame", {
-            Size = UDim2.new(1, 0, 1, 0),
-            BackgroundColor3 = bgColor,
-            BorderSizePixel = 0,
-            ZIndex = 0,
-        }, {
-            UICorner = Corner(6),
-            UIStroke = Border(1),
-        }),
-        Rank = Roui.Text({
-            Position = UDim2.new(0, 2, 0, 0),
-            Size = UDim2.new(0, 12, 1, 0),
-            Text = tostring(props.Rank or 1),
-            TextSize = 8,
-            ZIndex = 1,
-        }),
-    }
-    
-    -- 如果有提供 UserId，显示头像
+    local rank = props.Rank or 1
+    local isHighlight = props.Highlight
+
+    local avatarImage = ""
     if props.UserId then
-        children.Avatar = el("ImageLabel", {
-            Position = UDim2.new(0, 16, 0.5, 0),
-            AnchorPoint = Vector2.new(0, 0.5),
-            Size = UDim2.new(0, 12, 0, 12),
-            BackgroundTransparency = 1,
-            Image = "https://www.roblox.com/bust-thumbnails/v1/avatar?userId=" .. props.UserId .. "&width=48&height=48&format=png",
-            ZIndex = 1,
-        })
-        children.Name = Roui.Text({
-            Position = UDim2.new(0, 31, 0, 0),
-            Size = UDim2.new(0.45, -31, 1, 0),
-            Text = props.Name or "Player",
-            TextSize = 7,
-            TextXAlignment = Enum.TextXAlignment.Left,
-            ZIndex = 1,
-        })
-        children.Score = Roui.Text({
-            Position = UDim2.new(0.45, 0, 0, 0),
-            Size = UDim2.new(0.55, -2, 1, 0),
-            Text = tostring(props.Score or 0),
-            TextSize = 7,
-            TextXAlignment = Enum.TextXAlignment.Right,
-            ZIndex = 1,
-        })
-    else
-        -- 没有头像时的布局
-        children.Name = Roui.Text({
-            Position = UDim2.new(0, 16, 0, 0),
-            Size = UDim2.new(0.6, -16, 1, 0),
-            Text = props.Name or "Player",
-            TextSize = 8,
-            TextXAlignment = Enum.TextXAlignment.Left,
-            ZIndex = 1,
-        })
-        children.Score = Roui.Text({
-            Position = UDim2.new(0.6, 0, 0, 0),
-            Size = UDim2.new(0.4, -3, 1, 0),
-            Text = tostring(props.Score or 0),
-            TextSize = 8,
-            TextXAlignment = Enum.TextXAlignment.Right,
-            ZIndex = 1,
-        })
+        avatarImage = "rbxthumb://type=AvatarHeadShot&id=" .. tostring(props.UserId) .. "&w=48&h=48"
     end
-    
-    return el("Frame", props, children)
+
+    return el("Frame", {
+        Size = UDim2.new(1, -6, 0, 22),
+        BackgroundColor3 = Color3.fromRGB(255, 255, 255),
+        BackgroundTransparency = isHighlight and 0.0 or 0.15,
+        BorderSizePixel = 0,
+        LayoutOrder = rank,
+    }, {
+        UICorner = Corner(13),
+        -- Avatar
+        Avatar = el("ImageLabel", {
+            Position = UDim2.new(0, 3, 0.5, 0),
+            AnchorPoint = Vector2.new(0, 0.5),
+            Size = UDim2.new(0, 17, 0, 17),
+            BackgroundColor3 = Color3.fromRGB(220, 220, 220),
+            BackgroundTransparency = 0,
+            Image = avatarImage,
+            ZIndex = 2,
+        }, {
+            UICorner = Corner(9),
+        }),
+        -- Rank number (blue bold)
+        RankLabel = el("TextLabel", {
+            Position = UDim2.new(0, 22, 0, 0),
+            Size = UDim2.new(0, 12, 1, 0),
+            BackgroundTransparency = 1,
+            Text = tostring(rank) .. ".",
+            TextSize = 9,
+            Font = Enum.Font.GothamBlack,
+            TextColor3 = Color3.fromRGB(50, 120, 255),
+            TextXAlignment = Enum.TextXAlignment.Left,
+            ZIndex = 2,
+        }),
+        -- Name (black bold)
+        NameLabel = el("TextLabel", {
+            Position = UDim2.new(0, 36, 0, 0),
+            Size = UDim2.new(1, -78, 1, 0),
+            BackgroundTransparency = 1,
+            Text = props.Name or "Player",
+            TextSize = 9,
+            Font = Enum.Font.GothamBold,
+            TextColor3 = Color3.fromRGB(20, 20, 20),
+            TextXAlignment = Enum.TextXAlignment.Left,
+            ZIndex = 2,
+        }),
+        -- Score (dark, right-aligned)
+        ScoreLabel = el("TextLabel", {
+            Position = UDim2.new(1, -40, 0, 0),
+            Size = UDim2.new(0, 38, 1, 0),
+            BackgroundTransparency = 1,
+            Text = tostring(props.Score or 0),
+            TextSize = 9,
+            Font = Enum.Font.GothamBlack,
+            TextColor3 = Color3.fromRGB(20, 20, 20),
+            TextXAlignment = Enum.TextXAlignment.Right,
+            ZIndex = 2,
+        }),
+    })
 end
 
--- Leaderboard component (Updated style)
+-- Leaderboard component (dark semi-transparent outer card)
 function Roui.Leaderboard(props, children)
-    props = mergeProps(props, {
-        Size = UDim2.new(0, 75, 0, 120),
-        BackgroundColor3 = Color3.fromRGB(40, 40, 50),
+    local outerProps = {
+        Size = props.Size or UDim2.new(0, 175, 0, 120),
+        Position = props.Position,
+        AnchorPoint = props.AnchorPoint,
+        BackgroundColor3 = Color3.fromRGB(30, 30, 40),
+        BackgroundTransparency = 0.3,
         BorderSizePixel = 0,
+    }
+
+    -- Inject padding inside the outer frame
+    local innerChildren = children or {}
+    innerChildren.OuterCorner = Corner(12)
+    innerChildren.OuterStroke = el("UIStroke", {
+        Color = Color3.fromRGB(200, 200, 220),
+        Thickness = 1.5,
+        Transparency = 0.4,
+        ApplyStrokeMode = Enum.ApplyStrokeMode.Border,
     })
-    
-    return el("Frame", props, children or {})
+    innerChildren.UIPadding = el("UIPadding", {
+        PaddingLeft   = UDim.new(0, 4),
+        PaddingRight  = UDim.new(0, 4),
+        PaddingTop    = UDim.new(0, 4),
+        PaddingBottom = UDim.new(0, 4),
+    })
+
+    return el("Frame", outerProps, innerChildren)
 end
 
 -- Overlay component

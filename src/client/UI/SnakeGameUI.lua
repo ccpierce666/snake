@@ -502,7 +502,7 @@ local SnakeGameUIRoot = Roact.Component:extend("SnakeGameUIRoot")
 
 function SnakeGameUIRoot:render()
     local state = self.props.state or {}
-    local myId = tostring(Players.LocalPlayer.UserId)
+    local myId = "u" .. tostring(Players.LocalPlayer.UserId)
     local mySnake = state.snakes and state.snakes[myId]
     local score = state.score or (mySnake and mySnake.score) or 0
     local money = state.money or 0

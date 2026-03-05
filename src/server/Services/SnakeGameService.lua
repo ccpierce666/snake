@@ -66,13 +66,18 @@ local SKIN_COLOR_POOL = {
 }
 local skinColorIndex = 0
 
+-- 统一 key 格式：所有内存表一律用 "u" + userId，避免 Lua 将纯数字字符串误判为整数 key
+local function uid(userId) return "u" .. tostring(userId) end
+-- 从 "uXXXXXX" 反向提取数字 userId（用于 GetPlayerByUserId 等需要数字的 API）
+local function uidNum(key) return tonumber(string.sub(tostring(key), 2)) end
+
 local function assignSkinColor(userId)
-    local uid = tostring(userId)
-    if not playerSkinColors[uid] then
+    local key = uid(userId)
+    if not playerSkinColors[key] then
         skinColorIndex = (skinColorIndex % #SKIN_COLOR_POOL) + 1
-        playerSkinColors[uid] = SKIN_COLOR_POOL[skinColorIndex]
+        playerSkinColors[key] = SKIN_COLOR_POOL[skinColorIndex]
     end
-    return playerSkinColors[uid]
+    return playerSkinColors[key]
 end
 
 -- 奖励配置
@@ -113,10 +118,10 @@ local FOOD_GROWTH_MAP = {
 
 local function getLeaderboard()
     local list = {}
-    for userId, s in pairs(snakes) do
+    for k, s in pairs(snakes) do
         if s.alive then
             table.insert(list, { 
-                userId = userId, 
+                userId = uidNum(k),  -- 客户端需要数字 userId（用于头像加载等）
                 score = s.score or 0, 
                 kills = s.kills or 0, 
                 length = s.displayLength or #s.body,
@@ -177,18 +182,18 @@ local function loadMoney(userId)
 end
 
 local function saveMoney(userId)
-    local uid = tostring(userId)
-    local m = playerMoney[uid]
+    local key = uid(userId)
+    local m = playerMoney[key]
     if m then
-        pcall(function() moneyStore:SetAsync("money_" .. uid, m) end)
+        pcall(function() moneyStore:SetAsync("money_" .. tostring(userId), m) end)
     end
 end
 
 local function saveSpins(userId)
-    local uid = tostring(userId)
-    local s = playerSpins[uid]
+    local key = uid(userId)
+    local s = playerSpins[key]
     if s then
-        pcall(function() spinStore:SetAsync("spin_" .. uid, s) end)
+        pcall(function() spinStore:SetAsync("spin_" .. tostring(userId), s) end)
     end
 end
 
@@ -197,7 +202,7 @@ end
 -------------------------------------------------------------------------------
 
 function SnakeGameService:AddSnakeLength(userId, amount)
-    local s = snakes[userId]
+    local s = snakes[uid(userId)]
     if not s or not s.alive then return end
 
     s.score = (s.score or 0) + amount
@@ -252,8 +257,8 @@ function SnakeGameService:AddSnakeLength(userId, amount)
 end
 
 function SnakeGameService:ClaimGift(player, index)
-    local uid = tostring(player.UserId)
-    local data = playerDailyGifts[uid]
+    local key = uid(player.UserId)
+    local data = playerDailyGifts[key]
     local reward = GIFT_REWARDS[index]
     if not data or not reward or data.claimed[tostring(index)] or data.timePlayed < reward.time then
         return false, "Cannot claim"
@@ -263,20 +268,20 @@ function SnakeGameService:ClaimGift(player, index)
     if reward.type == "Length" then
         self:AddSnakeLength(player.UserId, reward.amount)
     elseif reward.type == "Spin" then
-        playerSpins[uid] = (playerSpins[uid] or 0) + reward.amount
+        playerSpins[key] = (playerSpins[key] or 0) + reward.amount
     end
     
-    pcall(function() giftStore:SetAsync("gift_" .. uid, data) end)
+    pcall(function() giftStore:SetAsync("gift_" .. tostring(player.UserId), data) end)
     GiftUpdateSignal:FireTo(player, data)
     return true
 end
 
 function SnakeGameService:ChangeDirection(player, direction)
-    local s = snakes[player.UserId]
+    local s = snakes[uid(player.UserId)]
     if not s then return end
     if not s.alive then
         self:RequestRespawn(player)
-        s = snakes[player.UserId]
+        s = snakes[uid(player.UserId)]
     end
     
     if direction.Magnitude > 0.1 then
@@ -296,7 +301,7 @@ function SnakeGameService:RequestRespawn(player)
         table.insert(body, pos - Vector3.new(0.8 * i, 0, 0))
     end
     
-    snakes[player.UserId] = {
+    snakes[uid(player.UserId)] = {
         body = body,
         direction = Vector3.new(1, 0, 0),
         targetDirection = Vector3.new(0, 0, 0),
@@ -316,19 +321,19 @@ end
 
 -- 抽奖功能
 function SnakeGameService:Spin(player)
-    local uid = tostring(player.UserId)
-    local spins = playerSpins[uid] or 0
+    local key = uid(player.UserId)
+    local spins = playerSpins[key] or 0
     
     if spins <= 0 then
         return false, "No spins"
     end
     
     -- 扣除一次抽奖次数
-    playerSpins[uid] = spins - 1
+    playerSpins[key] = spins - 1
     saveSpins(player.UserId)
     
     -- 通知客户端抽奖次数更新
-    SpinsChangedSignal:FireTo(player, playerSpins[uid])
+    SpinsChangedSignal:FireTo(player, playerSpins[key])
     
     -- 根据概率随机抽奖
     local rand = math.random()
@@ -351,24 +356,24 @@ function SnakeGameService:Spin(player)
     if selectedReward.type == "Length" then
         self:AddSnakeLength(player.UserId, selectedReward.amount)
     elseif selectedReward.type == "Spin" then
-        playerSpins[uid] = (playerSpins[uid] or 0) + selectedReward.amount
+        playerSpins[key] = (playerSpins[key] or 0) + selectedReward.amount
         saveSpins(player.UserId)
     end
     
     print(string.format("[Spin] 玩家 %s 抽到: %s, 剩余抽奖: %d", 
-        player.Name, selectedReward.reward, playerSpins[uid]))
+        player.Name, selectedReward.reward, playerSpins[key]))
     
     return true, selectedReward
 end
 
 function SnakeGameService:GetGameState()
     local state = { snakes = {}, food = food, leaderboard = getLeaderboard() }
-    for uid, s in pairs(snakes) do
-        state.snakes[tostring(uid)] = {
+    for k, s in pairs(snakes) do
+        state.snakes[k] = {
             body = s.body, direction = s.direction, isMoving = s.isMoving,
             score = s.score, alive = s.alive,
             displayLength = s.displayLength or #s.body,
-            color = playerSkinColors[tostring(uid)],
+            color = playerSkinColors[k],
         }
     end
     return state
@@ -379,9 +384,9 @@ end
 -------------------------------------------------------------------------------
 
 function SnakeGameService.Client:ClaimGift(player, index) return self.Server:ClaimGift(player, index) end
-function SnakeGameService.Client:GetGiftData(player) return playerDailyGifts[tostring(player.UserId)] or loadGiftData(player.UserId) end
+function SnakeGameService.Client:GetGiftData(player) return playerDailyGifts[uid(player.UserId)] or loadGiftData(player.UserId) end
 function SnakeGameService.Client:Spin(player) return self.Server:Spin(player) end
-function SnakeGameService.Client:GetSpins(player) return playerSpins[tostring(player.UserId)] or 0 end
+function SnakeGameService.Client:GetSpins(player) return playerSpins[uid(player.UserId)] or 0 end
 function SnakeGameService.Client:GetGameState(p) return self.Server:GetGameState() end
 function SnakeGameService.Client:ChangeDirection(p, d) self.Server:ChangeDirection(p, d) end
 function SnakeGameService.Client:RequestRespawn(p) self.Server:RequestRespawn(p) end
@@ -463,32 +468,30 @@ end
 -- 私有函数：获取游戏状态（供 moveSnakes 使用）
 local function getGameStatePrivate()
     local state = { snakes = {}, food = food, leaderboard = getLeaderboard() }
-    for uid, s in pairs(snakes) do
-        state.snakes[tostring(uid)] = {
+    for k, s in pairs(snakes) do
+        -- k 本身就是 "uXXXXXX"，直接作为广播 key
+        state.snakes[k] = {
             body = s.body, direction = s.direction, isMoving = s.isMoving,
             score = s.score, alive = s.alive,
             displayLength = s.displayLength or #s.body,
-            color = playerSkinColors[tostring(uid)],
+            color = playerSkinColors[k],
         }
     end
     return state
 end
 
 local function moveSnakes()
-    for pid, s in pairs(snakes) do
+    for k, s in pairs(snakes) do
+        -- k 是 "uXXXXXX" 格式；需要数字 userId 时用 uidNum(k)
         if s.alive and s.isMoving then
             local head = s.body[1]
             local nextHead = head + s.targetDirection * SNAKE_SPEED * GAME_TICK
             
             -- 计算视觉大小和半径
             local visualSize = calculateVisualBodySize(s.score or 0)
-            local visualRadius = visualSize * 0.75 -- 头部半径约为 size * 1.5 / 2
+            local visualRadius = visualSize * 0.75
 
-            -- 动态边界限制：围墙位置(240) - 视觉半径，确保头部正好切到墙面
-            local limit = WALL_POSITION - visualRadius
-            
-            -- 额外的微小缓冲，防止浮点误差导致穿插
-            limit = limit - 0.2
+            local limit = WALL_POSITION - visualRadius - 0.2
 
             nextHead = Vector3.new(math.clamp(nextHead.X, -limit, limit), 0, math.clamp(nextHead.Z, -limit, limit))
             table.insert(s.body, 1, nextHead)
@@ -503,13 +506,12 @@ local function moveSnakes()
                 local dist = (nextHead - f.pos).Magnitude
                 if dist < pickupRange then
                     local growth = FOOD_GROWTH_MAP[f.value or 1] or 2
-                    SnakeGameService:AddSnakeLength(pid, growth)
+                    SnakeGameService:AddSnakeLength(uidNum(k), growth)
                     
                     -- 每吃 1 个食物获得 1 金钱 (1:1)
-                    local uid = tostring(pid)
-                    playerMoney[uid] = (playerMoney[uid] or 0) + 1
-                    local p = Players:GetPlayerByUserId(tonumber(pid))
-                    if p then MoneyChangedSignal:FireTo(p, playerMoney[uid]) end
+                    playerMoney[k] = (playerMoney[k] or 0) + 1
+                    local p = Players:GetPlayerByUserId(uidNum(k))
+                    if p then MoneyChangedSignal:FireTo(p, playerMoney[k]) end
                     
                     table.remove(food, i)
                     foodEaten = true
@@ -524,8 +526,8 @@ local function moveSnakes()
             end
             
             -- 蛇与蛇碰撞检测
-            for otherPid, otherSnake in pairs(snakes) do
-                if otherPid ~= pid and otherSnake.alive then
+            for otherK, otherSnake in pairs(snakes) do
+                if otherK ~= k and otherSnake.alive then
                     local otherScore = otherSnake.score or 0
                     local currentScore = s.score or 0
                     local otherHeadRadius = calculateSnakeRadius(otherScore)
@@ -533,22 +535,18 @@ local function moveSnakes()
                     
                     -- 检测当前蛇的头部与其他蛇的身体碰撞
                     for bodyIdx, bodySegment in ipairs(otherSnake.body) do
-                        -- 跳过对方的头部（头部碰撞不算）
                         if bodyIdx > 1 then
                             local dist = (nextHead - bodySegment).Magnitude
                             if dist < collisionDistance then
-                                -- 比较大小：只有小的蛇会死亡
                                 if otherScore > currentScore then
                                     -- 对方更大，当前蛇死亡
                                     local lostLength = s.displayLength or #s.body
                                     s.alive = false
                                     
-                                    -- 获取杀手信息
-                                    local killerPlayer = Players:GetPlayerByUserId(tonumber(otherPid))
+                                    local killerPlayer = Players:GetPlayerByUserId(uidNum(otherK))
                                     local killerName = killerPlayer and killerPlayer.Name or "Unknown"
-                                    local victim = Players:GetPlayerByUserId(tonumber(pid))
+                                    local victim = Players:GetPlayerByUserId(uidNum(k))
                                     
-                                    -- 通知受害者客户端
                                     if victim then
                                         SnakeDiedSignal:FireTo(victim, {
                                             killedBy = killerName,
@@ -557,21 +555,17 @@ local function moveSnakes()
                                         print("[SnakeGameService] Player " .. victim.Name .. " died to " .. killerName .. ", lost " .. lostLength)
                                     end
                                     
-                                    -- 其他蛇吃掉这条蛇的长度
-                                    SnakeGameService:AddSnakeLength(otherPid, lostLength)
-                                    
+                                    SnakeGameService:AddSnakeLength(uidNum(otherK), lostLength)
                                     break
                                 elseif currentScore > otherScore then
                                     -- 当前蛇更大，其他蛇死亡
                                     local lostLength = otherSnake.displayLength or #otherSnake.body
                                     otherSnake.alive = false
                                     
-                                    -- 获取被杀蛇的信息
-                                    local victim = Players:GetPlayerByUserId(tonumber(otherPid))
+                                    local victim = Players:GetPlayerByUserId(uidNum(otherK))
                                     local victimName = victim and victim.Name or "Unknown"
-                                    local killer = Players:GetPlayerByUserId(tonumber(pid))
+                                    local killer = Players:GetPlayerByUserId(uidNum(k))
                                     
-                                    -- 通知被害者客户端
                                     if victim then
                                         SnakeDiedSignal:FireTo(victim, {
                                             killedBy = killer and killer.Name or "Unknown",
@@ -580,9 +574,7 @@ local function moveSnakes()
                                         print("[SnakeGameService] Player " .. victimName .. " died to " .. (killer and killer.Name or "Unknown") .. ", lost " .. lostLength)
                                     end
                                     
-                                    -- 当前蛇吃掉其他蛇的长度
-                                    SnakeGameService:AddSnakeLength(pid, lostLength)
-                                    
+                                    SnakeGameService:AddSnakeLength(uidNum(k), lostLength)
                                     break
                                 end
                             end
@@ -625,46 +617,45 @@ function SnakeGameService:KnitInit()
     end)
     
     Players.PlayerAdded:Connect(function(p)
-        playerDailyGifts[tostring(p.UserId)] = loadGiftData(p.UserId)
+        local key = uid(p.UserId)
+        playerDailyGifts[key] = loadGiftData(p.UserId)
+        playerMoney[key] = loadMoney(p.UserId)
+        playerFoodCounts[key] = 0
         
-        -- 加载金钱
-        playerMoney[tostring(p.UserId)] = loadMoney(p.UserId)
-        playerFoodCounts[tostring(p.UserId)] = 0
-        
-        -- 延迟同步金钱，确保客户端已加载
         task.delay(1, function()
-            MoneyChangedSignal:FireTo(p, playerMoney[tostring(p.UserId)])
+            MoneyChangedSignal:FireTo(p, playerMoney[key])
         end)
         
         self:RequestRespawn(p)
         
-        -- 核心修复：确保角色重生时也能隐藏
         p.CharacterAdded:Connect(function()
             task.wait(0.5)
-            SnakeSpawnedSignal:Fire(p.UserId, snakes[p.UserId].body, assignSkinColor(p.UserId))
+            local sn = snakes[uid(p.UserId)]
+            if sn then
+                SnakeSpawnedSignal:Fire(p.UserId, sn.body, assignSkinColor(p.UserId))
+            end
         end)
     end)
     
     Players.PlayerRemoving:Connect(function(p)
         saveMoney(p.UserId)
-        local uid = tostring(p.UserId)
-        playerMoney[uid] = nil
-        playerFoodCounts[uid] = nil
-        playerDailyGifts[uid] = nil
-        if snakes[p.UserId] then snakes[p.UserId] = nil end
+        local key = uid(p.UserId)
+        playerMoney[key] = nil
+        playerFoodCounts[key] = nil
+        playerDailyGifts[key] = nil
+        snakes[key] = nil
     end)
     
     task.spawn(function()
         while true do
             task.wait(1)
             for _, p in ipairs(Players:GetPlayers()) do
-                local d = playerDailyGifts[tostring(p.UserId)]
+                local d = playerDailyGifts[uid(p.UserId)]
                 if d then
                     d.timePlayed = d.timePlayed + 1
                     if d.timePlayed % 5 == 0 then GiftUpdateSignal:FireTo(p, d) end
                 end
                 
-                -- 自动保存金钱 (每60秒)
                 if os.time() % 60 == 0 then
                     saveMoney(p.UserId)
                 end

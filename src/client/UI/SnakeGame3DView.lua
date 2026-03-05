@@ -5,6 +5,17 @@ local Workspace = game:GetService("Workspace")
 
 local SnakeGame3DView = {}
 
+-- 统一 userId key 格式，与服务器和 Controller 保持一致
+local function uid(userId) return "u" .. tostring(userId) end
+-- 从 "uXXXXX" 格式还原数字 userId，供 Players:GetPlayerByUserId 使用
+local function uidNum(key)
+    local s = tostring(key)
+    if string.sub(s, 1, 1) == "u" then
+        return tonumber(string.sub(s, 2))
+    end
+    return tonumber(s)
+end
+
 local gameFolder = nil
 local snakeParts = {} -- [index] = Part
 local activeFoodParts = {} -- [id] = Part
@@ -141,7 +152,7 @@ end
 
 -- 为蛇头创建名称标签 (BillboardGui) - 分开显示分数和名字
 local function createSnakeHeadLabel(userId)
-    local player = Players:GetPlayerByUserId(tonumber(userId))
+    local player = Players:GetPlayerByUserId(uidNum(userId))
     local playerName = player and player.Name or "Unknown"
     local screenGui = Instance.new("BillboardGui")
     screenGui.Size = UDim2.new(6, 0, 4, 0)
@@ -485,6 +496,7 @@ function SnakeGame3DView.Init()
                 pos = body[1],
                 isHead = true,
                 color = baseColor,
+                bodySize = bodySize,
             })
             table.insert(snakeHeads, userId)
 
@@ -506,6 +518,7 @@ function SnakeGame3DView.Init()
                         pos = pos,
                         isHead = false,
                         color = baseColor,
+                        bodySize = bodySize,
                     })
                     table.insert(snakeHeads, nil)
                 end
@@ -516,7 +529,7 @@ function SnakeGame3DView.Init()
         local bodySize = calculateBodySize(currentLength)
 
         if localPlayerSnakeState then
-            addSnakeRenderPoints(localPlayerSnakeState.body, true, bodySize, tostring(Players.LocalPlayer.UserId), localPlayerSnakeState.color)
+            addSnakeRenderPoints(localPlayerSnakeState.body, true, bodySize, uid(Players.LocalPlayer.UserId), localPlayerSnakeState.color)
         end
 
         for userId, s in pairs(otherSnakes) do
@@ -527,7 +540,7 @@ function SnakeGame3DView.Init()
         local needed = #snakePositions
 
         while #snakeParts < needed do
-            local part = createPart(gameFolder, SNAKE_BODY_COLOR, bodySize, Enum.PartType.Ball, Enum.Material.SmoothPlastic)
+            local part = createPart(gameFolder, SNAKE_BODY_COLOR, 1, Enum.PartType.Ball, Enum.Material.SmoothPlastic)
             table.insert(snakeParts, part)
         end
 
@@ -548,7 +561,8 @@ function SnakeGame3DView.Init()
                 snakeParts[i].Position = pos.pos + Vector3.new(0, 0, 0)
                 local isHead = pos.isHead
                 snakeParts[i].Color = pos.color or SNAKE_BODY_COLOR
-                local sz = isHead and (bodySize * 1.5) or bodySize
+                local partBodySize = pos.bodySize or bodySize
+                local sz = isHead and (partBodySize * 1.5) or partBodySize
                 snakeParts[i].Size = Vector3.new(sz, sz, sz)
                 snakeParts[i].Transparency = 0
                 
@@ -594,9 +608,7 @@ function SnakeGame3DView.Init()
         -- 更新所有蛇头的名称标签
         -- 本地玩家
         if localPlayerSnakeState and localPlayerSnakeState.body and #localPlayerSnakeState.body > 0 then
-            local localUserId = tostring(Players.LocalPlayer.UserId)
-            
-            
+            local localUserId = uid(Players.LocalPlayer.UserId)
             local localLabel = snakeHeadNameLabels[localUserId]
             if not localLabel then
                 localLabel = createSnakeHeadLabel(localUserId)
@@ -658,7 +670,7 @@ function SnakeGame3DView.Init()
         
         -- 其他玩家
         for userId, label in pairs(snakeHeadNameLabels) do
-            if userId ~= tostring(Players.LocalPlayer.UserId) then
+            if userId ~= uid(Players.LocalPlayer.UserId) then
                 if otherSnakes[userId] and otherSnakes[userId].body and #otherSnakes[userId].body > 0 then
                     if label then
                         local score = otherSnakes[userId].logicalLength or #otherSnakes[userId].body
@@ -728,10 +740,10 @@ function SnakeGame3DView.Init()
         -- 更新所有蛇头的长度标签
         -- 本地玩家
         if localPlayerSnakeState and localPlayerSnakeState.body and #localPlayerSnakeState.body > 0 then
-            local localLengthLabel = snakeLengthLabels[tostring(Players.LocalPlayer.UserId)]
+            local localLengthLabel = snakeLengthLabels[uid(Players.LocalPlayer.UserId)]
             if not localLengthLabel then
-                localLengthLabel = createSnakeLengthLabel(tostring(Players.LocalPlayer.UserId))
-                snakeLengthLabels[tostring(Players.LocalPlayer.UserId)] = localLengthLabel
+                localLengthLabel = createSnakeLengthLabel(uid(Players.LocalPlayer.UserId))
+                snakeLengthLabels[uid(Players.LocalPlayer.UserId)] = localLengthLabel
             end
             if localLengthLabel then
                 local localHeadPos = localPlayerSnakeState.body[1]
@@ -741,7 +753,7 @@ function SnakeGame3DView.Init()
                     if textLabel then
                         textLabel.Text = tostring(math.floor(score))
                     end
-                    local anchor = getOrCreateAnchorPart(tostring(Players.LocalPlayer.UserId))
+                    local anchor = getOrCreateAnchorPart(uid(Players.LocalPlayer.UserId))
                     localLengthLabel.Adornee = anchor  -- 复用名字标签的锚点
                     if localLengthLabel.MaxDistance == 0 then
                         localLengthLabel.MaxDistance = 500
@@ -756,7 +768,7 @@ function SnakeGame3DView.Init()
         
         -- 其他玩家的长度标签
         for userId, lengthLabel in pairs(snakeLengthLabels) do
-            if userId ~= tostring(Players.LocalPlayer.UserId) then
+            if userId ~= uid(Players.LocalPlayer.UserId) then
                 if otherSnakes[userId] and otherSnakes[userId].body and #otherSnakes[userId].body > 0 then
                     if lengthLabel then
                         local score = otherSnakes[userId].logicalLength or #otherSnakes[userId].body
@@ -798,22 +810,18 @@ function SnakeGame3DView.Init()
 end
 
 function SnakeGame3DView.SpawnSnake(userId, body, color)
-    userId = tostring(userId)
-    local localUserId = tostring(Players.LocalPlayer.UserId)
+    userId = tostring(userId)  -- 调用方传入 "uXXXX" 字符串，tostring 保持不变
+    local localUserId = uid(Players.LocalPlayer.UserId)
     
     -- Ensure body is a table
     if typeof(body) == "Vector3" then
         body = {body}
     end
     
-    if userId == localUserId then
-        print("[3DView] 🐍 生成本地玩家蛇")
-    else
-        print("[3DView] 🐍 生成其他玩家蛇: userId=" .. userId)
-    end
+    
 
     if userId == localUserId then
-        local p = Players:GetPlayerByUserId(tonumber(userId))
+        local p = Players:GetPlayerByUserId(uidNum(userId))
         if p then hideCharacter(p) end
 
         localPlayerSnakeState = {
@@ -828,7 +836,7 @@ function SnakeGame3DView.SpawnSnake(userId, body, color)
             color = color or Color3.fromRGB(255, 210, 60),
         }
     else
-        local p = Players:GetPlayerByUserId(tonumber(userId))
+        local p = Players:GetPlayerByUserId(uidNum(userId))
         if p then hideCharacter(p) end
 
         -- 获取玩家名字并记录到蛇数据中
@@ -876,7 +884,7 @@ end
 -- New function to sync snake data from controller
 function SnakeGame3DView.UpdateSnakeData(userId, data)
     userId = tostring(userId)
-    local localUserId = tostring(Players.LocalPlayer.UserId)
+    local localUserId = uid(Players.LocalPlayer.UserId)
     
     local snake = (userId == localUserId) and localPlayerSnakeState or otherSnakes[userId]
     
@@ -888,7 +896,6 @@ function SnakeGame3DView.UpdateSnakeData(userId, data)
         elseif data.pos then
              body = {data.pos}
         end
-        print("[3DView] 为玩家 " .. userId .. " 生成蛇，身体长度: " .. #body .. ", 分数: " .. (data.score or 0))
         SnakeGame3DView.SpawnSnake(userId, body)
         snake = (userId == localUserId) and localPlayerSnakeState or otherSnakes[userId]
     end
@@ -897,7 +904,7 @@ function SnakeGame3DView.UpdateSnakeData(userId, data)
     if snake then
         -- 记录玩家名字（确保总是有最新的，如果还是Unknown就继续尝试）
         if not snake.playerName or snake.playerName == "Unknown" then
-            local player = Players:GetPlayerByUserId(tonumber(userId))
+            local player = Players:GetPlayerByUserId(uidNum(userId))
             if player then
                 snake.playerName = player.Name
             end
@@ -908,11 +915,7 @@ function SnakeGame3DView.UpdateSnakeData(userId, data)
             snake.isMoving = data.isMoving
         end
         if data.score and data.score > 0 then
-            local oldLength = snake.logicalLength
             snake.logicalLength = data.score
-            if oldLength ~= data.score then
-                print("[3DView] 玩家 " .. userId .. " logicalLength 更新: " .. (oldLength or "nil") .. " -> " .. data.score)
-            end
         end
         -- 同步身体放大倍数（displayLength）
         if data.displayLength then
@@ -923,12 +926,10 @@ function SnakeGame3DView.UpdateSnakeData(userId, data)
         end
         if data.body then
             if userId ~= localUserId then
-                print("[3DView] 玩家 " .. userId .. " 身体数据更新: 旧长度=" .. #snake.body .. ", 新长度=" .. #data.body)
                 snake.body = data.body
             else
                 -- 对于本地蛇，如果服务器更长（说明发生了生长），则采纳服务器的长度
                 if #data.body > #snake.body then
-                    print("[3DView] 本地蛇身体数据更新: 旧长度=" .. #snake.body .. ", 新长度=" .. #data.body)
                     snake.body = data.body
                 end
             end
@@ -938,7 +939,7 @@ end
 
 function SnakeGame3DView.RemoveSnake(userId)
     userId = tostring(userId)
-    if userId == tostring(Players.LocalPlayer.UserId) then
+    if userId == uid(Players.LocalPlayer.UserId) then
         localPlayerSnakeState = nil
     else
         otherSnakes[userId] = nil

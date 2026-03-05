@@ -13,6 +13,9 @@ local SpinWheelUI = require(script.Parent.Parent.UI.SpinWheelUI)
 
 local SnakeGameController = Knit.CreateController { Name = "SnakeGameController" }
 
+-- 统一 userId key 格式，与服务器保持一致
+local function uid(userId) return "u" .. tostring(userId) end
+
 print("[SnakeGameController] 模块加载")
 
 function SnakeGameController:KnitStart()
@@ -45,7 +48,7 @@ function SnakeGameController:KnitStart()
 
         -- 如果关闭自动模式，立即停止移动
         if not isAutoMode then
-            SnakeGame3DView.UpdateSnakeDirection(tostring(Players.LocalPlayer.UserId), Vector3.new(0, 0, 0), false)
+            SnakeGame3DView.UpdateSnakeDirection(uid(Players.LocalPlayer.UserId), Vector3.new(0, 0, 0), false)
             if SnakeGameService then
                 pcall(function() SnakeGameService:ChangeDirection(Vector3.new(0, 0, 0)) end)
             end
@@ -149,8 +152,7 @@ function SnakeGameController:KnitStart()
     -- 蛇生成
     if SnakeGameService.SnakeSpawned then
         SnakeGameService.SnakeSpawned:Connect(function(userId, spawnPos, color)
-            print("[SnakeGameController] SnakeSpawned:", userId, spawnPos)
-            SnakeGame3DView.SpawnSnake(userId, spawnPos, color)
+            SnakeGame3DView.SpawnSnake(uid(userId), spawnPos, color)
         end)
     end
 
@@ -166,27 +168,31 @@ function SnakeGameController:KnitStart()
     if SnakeGameService.LeaderboardChanged then
         SnakeGameService.LeaderboardChanged:Connect(function(leaderboard, snakesData)
             ClientState.leaderboard = leaderboard
-            local localId = tostring(Players.LocalPlayer.UserId)
+            local localId = uid(Players.LocalPlayer.UserId)
 
             -- 1. 更新所有蛇的逻辑长度和物理坐标
             for _, entry in ipairs(leaderboard) do
-                local uid = tostring(entry.userId)
+                local ukey = uid(entry.userId)  -- "u" + 数字 userId，与服务器 snakesData key 一致
                 local score = entry.score or 0
                 
                 -- 获取该蛇的最新服务器坐标数据
-                local serverSnake = snakesData and snakesData[uid]
+                local serverSnake = snakesData and snakesData[ukey]
                 local syncData = { score = score, displayLength = serverSnake and serverSnake.displayLength }
                 if serverSnake and serverSnake.body then
                     syncData.body = serverSnake.body
-                    print("[Controller] 更新玩家 " .. uid .. " - 身体长度: " .. #serverSnake.body .. ", 分数: " .. score .. ", displayLength: " .. (serverSnake.displayLength or "nil"))
                 else
-                    print("[Controller] 玩家 " .. uid .. " 没有身体数据 - serverSnake存在: " .. tostring(serverSnake ~= nil) .. ", 分数: " .. score)
+                    -- 没有 body 数据时补充 dir/isMoving（避免 3DView 丢失方向信息）
+                    if serverSnake then
+                        syncData.dir = serverSnake.direction
+                        syncData.isMoving = serverSnake.isMoving
+                    end
                 end
+                if serverSnake and serverSnake.color then syncData.color = serverSnake.color end
 
                 -- 更新 3D 渲染数据
-                SnakeGame3DView.UpdateSnakeData(uid, syncData)
+                SnakeGame3DView.UpdateSnakeData(ukey, syncData)
                 
-                if uid == localId then
+                if ukey == localId then
                     lastScore = score
                     ClientState.score = score
                 end
@@ -202,9 +208,8 @@ function SnakeGameController:KnitStart()
     -- 方向同步（其他玩家）
     if SnakeGameService.DirectionChanged then
         SnakeGameService.DirectionChanged:Connect(function(userId, direction, isMoving)
-            local localId = Players.LocalPlayer.UserId
-            if userId ~= localId then
-                SnakeGame3DView.UpdateSnakeDirection(userId, direction, isMoving)
+            if userId ~= Players.LocalPlayer.UserId then
+                SnakeGame3DView.UpdateSnakeDirection(uid(userId), direction, isMoving)
             end
         end)
     end
@@ -241,7 +246,7 @@ function SnakeGameController:KnitStart()
             ClientState.killedBy = deathData.killedBy or "Unknown"
             ClientState.lostSize = deathData.lostSize or 0
             -- 移除当前蛇的 3D 视图
-            SnakeGame3DView.RemoveSnake(tostring(Players.LocalPlayer.UserId))
+            SnakeGame3DView.RemoveSnake(uid(Players.LocalPlayer.UserId))
             SnakeGameUI.Update(ClientState)
             print("[SnakeGameController] 玩家死亡: " .. ClientState.killedBy .. ", 损失: " .. ClientState.lostSize)
         end)
@@ -286,9 +291,9 @@ function SnakeGameController:KnitStart()
                 -- 初始化排行榜
                 if state.leaderboard then
                     ClientState.leaderboard = state.leaderboard
-                    local localId = tostring(Players.LocalPlayer.UserId)
+                    local localNumId = Players.LocalPlayer.UserId
                     for _, entry in ipairs(state.leaderboard) do
-                        if tostring(entry.userId) == localId then
+                        if entry.userId == localNumId then
                             lastScore = entry.score or 0
                             ClientState.score = lastScore
                             break
@@ -340,10 +345,10 @@ function SnakeGameController:KnitStart()
         end
 
         if dir.Magnitude > 0.01 then
-            SnakeGame3DView.UpdateSnakeDirection(tostring(Players.LocalPlayer.UserId), dir, true)
+            SnakeGame3DView.UpdateSnakeDirection(uid(Players.LocalPlayer.UserId), dir, true)
             pcall(function() SnakeGameService:ChangeDirection(dir) end)
         else
-            SnakeGame3DView.UpdateSnakeDirection(tostring(Players.LocalPlayer.UserId), Vector3.new(0, 0, 0), false)
+            SnakeGame3DView.UpdateSnakeDirection(uid(Players.LocalPlayer.UserId), Vector3.new(0, 0, 0), false)
             pcall(function() SnakeGameService:ChangeDirection(Vector3.new(0, 0, 0)) end)
         end
     end
@@ -408,14 +413,14 @@ function SnakeGameController:KnitStart()
                 local combined = flatForward * normalizedY + flatRight * normalizedX
                 if combined.Magnitude > 0.01 then
                     local dir = combined.Unit
-                    SnakeGame3DView.UpdateSnakeDirection(tostring(Players.LocalPlayer.UserId), dir, true)
+                    SnakeGame3DView.UpdateSnakeDirection(uid(Players.LocalPlayer.UserId), dir, true)
                     pcall(function() SnakeGameService:ChangeDirection(dir) end)
                 end
             else
                 local dir = Vector3.new(normalizedX, 0, -normalizedY)
                 if dir.Magnitude > 0.01 then
                     dir = dir.Unit
-                    SnakeGame3DView.UpdateSnakeDirection(tostring(Players.LocalPlayer.UserId), dir, true)
+                    SnakeGame3DView.UpdateSnakeDirection(uid(Players.LocalPlayer.UserId), dir, true)
                     pcall(function() SnakeGameService:ChangeDirection(dir) end)
                 end
             end
@@ -423,12 +428,11 @@ function SnakeGameController:KnitStart()
     end)
 
     UserInputService.TouchEnded:Connect(function(touchInput, processed)
-        -- 只有摇杆手指抬起才停止移动
         if touchInput ~= joystickTouchId then return end
         joystickTouchId = nil
         touchStartPos = nil
         touchMoving = false
-        SnakeGame3DView.UpdateSnakeDirection(tostring(Players.LocalPlayer.UserId), Vector3.new(0, 0, 0), false)
+        SnakeGame3DView.UpdateSnakeDirection(uid(Players.LocalPlayer.UserId), Vector3.new(0, 0, 0), false)
         pcall(function() SnakeGameService:ChangeDirection(Vector3.new(0, 0, 0)) end)
     end)
 
@@ -473,7 +477,7 @@ function SnakeGameController:KnitStart()
 
         if nearest then
             local dir = (nearest - headPos).Unit
-            SnakeGame3DView.UpdateSnakeDirection(tostring(Players.LocalPlayer.UserId), dir, true)
+            SnakeGame3DView.UpdateSnakeDirection(uid(Players.LocalPlayer.UserId), dir, true)
             pcall(function() SnakeGameService:ChangeDirection(dir) end)
         end
     end)

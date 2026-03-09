@@ -17,6 +17,7 @@ local SnakeDiedSignal = Knit.CreateSignal()
 local GiftUpdateSignal = Knit.CreateSignal()
 local SpeedMultiplierChangedSignal = Knit.CreateSignal()
 local SizeMultiplierChangedSignal = Knit.CreateSignal()
+local KillAllSignal = Knit.CreateSignal()
 
 local SnakeGameService = Knit.CreateService {
     Name = "SnakeGameService",
@@ -30,6 +31,7 @@ local SnakeGameService = Knit.CreateService {
         GiftUpdate = GiftUpdateSignal,
         SpeedMultiplierChanged = SpeedMultiplierChangedSignal,
         SizeMultiplierChanged = SizeMultiplierChangedSignal,
+        KillAll = KillAllSignal,
     },
 }
 
@@ -43,6 +45,7 @@ SnakeGameService.SnakeDied = SnakeDiedSignal
 SnakeGameService.GiftUpdate = GiftUpdateSignal
 SnakeGameService.SpeedMultiplierChanged = SpeedMultiplierChangedSignal
 SnakeGameService.SizeMultiplierChanged = SizeMultiplierChangedSignal
+SnakeGameService.KillAll = KillAllSignal
 
 -- 声明服务器方法（客户端代理会拦截这些调用）
 function SnakeGameService:GetGameState()
@@ -68,6 +71,10 @@ function SnakeGameService:GetSizeMultiplier()
 end
 
 function SnakeGameService:RequestPurchase2xSize()
+    -- 客户端版本只是占位符，实际调用会被 Knit 代理转发到服务器
+end
+
+function SnakeGameService:RequestPurchaseKillAll()
     -- 客户端版本只是占位符，实际调用会被 Knit 代理转发到服务器
 end
 

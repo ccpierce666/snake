@@ -413,16 +413,15 @@ function SnakeGame3DView.Init()
     -- 客户端创建地面和围墙
     createEnvironment(gameFolder)
 
-    -- 增加：高频率角色隐藏循环，确保彻底不显示默认角色
-    task.spawn(function()
-        while true do
-            task.wait(1.0)
-            local char = Players.LocalPlayer.Character
-            if char then
-                hideCharacter(Players.LocalPlayer)
-            end
-        end
-    end)
+    -- 事件驱动：角色重生时隐藏，不再用 while 轮询
+    local function onCharacterAdded(char)
+        task.wait(0.1) -- 等角色完全加载
+        hideCharacter(Players.LocalPlayer)
+    end
+    Players.LocalPlayer.CharacterAdded:Connect(onCharacterAdded)
+    if Players.LocalPlayer.Character then
+        onCharacterAdded(Players.LocalPlayer.Character)
+    end
 
     -- 创建虚线圈 (20段)
     for i = 1, 20 do
@@ -931,6 +930,18 @@ function SnakeGame3DView.UpdateSnakeData(userId, data)
         end
         if data.isMoving ~= nil then
             snake.isMoving = data.isMoving
+        end
+        -- 轻量头部坐标修正（由 DirectionChanged 事件携带，不含完整 body）
+        -- 只修正其他玩家/AI，本地玩家位置由客户端预测管理
+        if data.headPos and userId ~= localUserId and snake.body and #snake.body > 0 then
+            local serverHead = data.headPos
+            local localHead = snake.body[1]
+            local diff = (serverHead - localHead).Magnitude
+            if diff > 6 then
+                snake.body[1] = serverHead
+            elseif diff > 0.05 then
+                snake.body[1] = localHead:Lerp(serverHead, 0.35)
+            end
         end
         if data.score and data.score > 0 then
             snake.logicalLength = data.score

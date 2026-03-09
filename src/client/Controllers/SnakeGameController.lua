@@ -165,6 +165,16 @@ function SnakeGameController:KnitStart()
         pcall(function() svc:RequestPurchase2xSize() end)
     end
 
+    SnakeGameUI.Callbacks.onPurchaseKillAll = function()
+        local svc = SnakeGameService or (Knit and Knit.GetService and Knit.GetService("SnakeGameService"))
+        if not svc then
+            warn("[SnakeGameController] Kill All: 服务未就绪")
+            return
+        end
+        print("[SnakeGameController] 点击 Kill All，请求购买...")
+        pcall(function() svc:RequestPurchaseKillAll() end)
+    end
+
     -- 3. 初始化 UI 和 3D 视图
     SnakeGameUI.Start()
     SnakeGame3DView.Init()
@@ -216,9 +226,12 @@ function SnakeGameController:KnitStart()
                     playerName = serverSnake and serverSnake.playerName,
                 }
                 if serverSnake then
-                    -- isMoving 和 dir 必须无论是否有 body 都要同步，否则客户端预测循环永远不启动
                     syncData.isMoving = serverSnake.isMoving
-                    syncData.dir = serverSnake.direction
+                    -- 本地玩家的方向由玩家输入驱动，不能被服务端广播覆盖
+                    -- 否则当玩家刚改变方向、服务端还未收到更新时，会触发方向闪现
+                    if ukey ~= localId then
+                        syncData.dir = serverSnake.direction
+                    end
                     if serverSnake.body then
                         syncData.body = serverSnake.body
                     end
@@ -241,11 +254,17 @@ function SnakeGameController:KnitStart()
         end)
     end
 
-    -- 方向同步（其他玩家）
+    -- 方向同步（其他玩家 + AI），同时携带头部坐标用于位置修正
+    -- 现在是事件驱动：玩家转向时触发，AI 每 0.15~0.30s 决策时触发
     if SnakeGameService.DirectionChanged then
-        SnakeGameService.DirectionChanged:Connect(function(userId, direction, isMoving)
+        SnakeGameService.DirectionChanged:Connect(function(userId, direction, isMoving, headPos)
             if userId ~= Players.LocalPlayer.UserId then
-                SnakeGame3DView.UpdateSnakeDirection(uid(userId), direction, isMoving)
+                local ukey = uid(userId)
+                local syncData = { dir = direction, isMoving = isMoving }
+                if headPos then
+                    syncData.headPos = headPos
+                end
+                SnakeGame3DView.UpdateSnakeData(ukey, syncData)
             end
         end)
     end
@@ -292,6 +311,17 @@ function SnakeGameController:KnitStart()
         end)
     end
     
+    -- Kill All 信号（购买者触发，所有客户端清除被杀死蛇的 3D 尸体）
+    if SnakeGameService.KillAll then
+        SnakeGameService.KillAll:Connect(function(killedIds)
+            if not killedIds then return end
+            for _, numId in ipairs(killedIds) do
+                SnakeGame3DView.RemoveSnake(uid(numId))
+            end
+            print("[SnakeGameController] KillAll: 清除", #killedIds, "条蛇")
+        end)
+    end
+
     -- 蛇死亡信号（服务器广播给所有客户端：所有人移除该蛇尸体，仅受害者显示 You are dead）
     if SnakeGameService.SnakeDied then
         SnakeGameService.SnakeDied:Connect(function(deathData)
@@ -507,24 +537,22 @@ function SnakeGameController:KnitStart()
         pcall(function() SnakeGameService:ChangeDirection(Vector3.new(0, 0, 0)) end)
     end)
 
-    -- 8. 自动寻路 & 计时器 Loop
-    local tickTimer = 0
-    local lastGiftTime = 0
-    RunService.Heartbeat:Connect(function(dt)
-        -- A. 礼物计时器逻辑 (更新数据，少频率刷新 UI)
-        if ClientState.giftData then
-            tickTimer = tickTimer + dt
-            if tickTimer >= 1.0 then
-                tickTimer = tickTimer - 1.0
+    -- 8a. 礼物计时器（独立 1 秒定时器，不再占用每帧 Heartbeat）
+    task.spawn(function()
+        while true do
+            task.wait(1)
+            if ClientState.giftData then
                 ClientState.giftData.timePlayed = (ClientState.giftData.timePlayed or 0) + 1
-                -- 只在礼物面板打开时刷新 UI
                 if ClientState.showGiftPanel then
                     SnakeGameUI.Update(ClientState)
                 end
             end
         end
+    end)
 
-        -- B. 自动寻路逻辑
+    -- 8b. 自动寻路 Loop（保留 Heartbeat，但只处理寻路，不再做计时器）
+    RunService.Heartbeat:Connect(function(dt)
+        -- 自动寻路逻辑
         if not isAutoMode or not ClientState.food or #ClientState.food == 0 then return end
 
         autoTimer = autoTimer + dt

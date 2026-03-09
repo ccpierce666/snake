@@ -25,6 +25,8 @@ local sizeStore = DataStoreService:GetDataStore("SnakeGameSize_v1")
 local PRODUCT_ID_2X_SPEED = 3552817506
 -- Developer Product: 2x Size (Robux 购买)
 local PRODUCT_ID_2X_SIZE = 3552878046
+-- Developer Product: Kill All (Robux 购买)
+local PRODUCT_ID_KILL_ALL = 3552907357
 
 local Knit = _G.KnitInstance or require(ReplicatedStorage.Common.Knit)
 
@@ -39,6 +41,7 @@ local GiftUpdateSignal = Knit.CreateSignal()
 local SpinsChangedSignal = Knit.CreateSignal()  -- 抽奖次数更新信号
 local SpeedMultiplierChangedSignal = Knit.CreateSignal()  -- 2x 速度购买成功
 local SizeMultiplierChangedSignal = Knit.CreateSignal()   -- 2x 体型购买成功
+local KillAllSignal = Knit.CreateSignal()                 -- Kill All 购买后广播，通知所有客户端清除死亡蛇
 
 local SnakeGameService = Knit.CreateService {
     Name = "SnakeGameService",
@@ -53,6 +56,7 @@ local SnakeGameService = Knit.CreateService {
         SpinsChanged = SpinsChangedSignal,
         SpeedMultiplierChanged = SpeedMultiplierChangedSignal,
         SizeMultiplierChanged = SizeMultiplierChangedSignal,
+        KillAll = KillAllSignal,
     },
 }
 
@@ -60,8 +64,6 @@ local SnakeGameService = Knit.CreateService {
 local snakes = {}
 local food = {}
 local nextFoodId = 1
-local leaderboardUpdateCounter = 0
-local LEADERBOARD_UPDATE_INTERVAL = 3 -- 每3帧更新一次排行榜
 local playerMoney = {}
 local playerSpins = {}
 local playerDailyGifts = {}
@@ -355,13 +357,14 @@ function SnakeGameService:ChangeDirection(player, direction)
         s = snakes[uid(player.UserId)]
     end
     
+    local head = s.body and s.body[1]
     if direction.Magnitude > 0.1 then
         s.targetDirection = direction.Unit
         s.isMoving = true
-        DirectionChangedSignal:Fire(player.UserId, s.targetDirection, true)
+        DirectionChangedSignal:Fire(player.UserId, s.targetDirection, true, head)
     else
         s.isMoving = false
-        DirectionChangedSignal:Fire(player.UserId, s.targetDirection, false)
+        DirectionChangedSignal:Fire(player.UserId, s.targetDirection, false, head)
     end
 end
 
@@ -472,6 +475,7 @@ function SnakeGameService.Client:GetSizeMultiplier(p)
     return playerSizeMultiplier[uid(p.UserId)] or 1
 end
 function SnakeGameService.Client:RequestPurchase2xSize(p) self.Server:RequestPurchase2xSize(p) end
+function SnakeGameService.Client:RequestPurchaseKillAll(p) self.Server:RequestPurchaseKillAll(p) end
 
 -- 注意：本项目的 Knit 实现会为 Service 上的公开方法创建 RemoteFunction（Call_Service_Method）。
 -- 因此需要提供同名的 Service 方法供客户端 InvokeServer 调用。
@@ -515,6 +519,12 @@ function SnakeGameService:RequestPurchase2xSize(player)
     end
     print("[SnakeGameService] 弹出 2x Size 购买窗口, Player=" .. (player and player.Name or "?"))
     MarketplaceService:PromptProductPurchase(player, PRODUCT_ID_2X_SIZE)
+    return true
+end
+
+function SnakeGameService:RequestPurchaseKillAll(player)
+    print("[SnakeGameService] 弹出 Kill All 购买窗口, Player=" .. (player and player.Name or "?"))
+    MarketplaceService:PromptProductPurchase(player, PRODUCT_ID_KILL_ALL)
     return true
 end
 
@@ -653,6 +663,13 @@ local function moveSnakes()
                     end
 
                     s.aiDesiredDirection = desired
+
+                    -- 事件驱动：AI 决策方向时广播给所有客户端，用于位置校正
+                    -- 触发频率 0.15~0.30s，比每帧广播少 40~80 倍
+                    local broadcastDir = desired or s.targetDirection
+                    if broadcastDir and broadcastDir.Magnitude > 0.1 then
+                        DirectionChangedSignal:Fire(uidNum(k), broadcastDir, true, head)
+                    end
                 end
 
                 -- 转向速率限制：逐渐转向 desired，形成曲线而不是直线拉扯
@@ -896,13 +913,8 @@ function SnakeGameService:KnitInit()
             end
         end
         
-        -- 定期更新排行榜（每3帧更新一次）
-        leaderboardUpdateCounter = leaderboardUpdateCounter + 1
-        if leaderboardUpdateCounter >= LEADERBOARD_UPDATE_INTERVAL then
-            leaderboardUpdateCounter = 0
-            local state = SnakeGameService:GetGameState()
-            LeaderboardChangedSignal:Fire(state.leaderboard, state.snakes)
-        end
+        -- 排行榜和蛇数据均为事件驱动：吃食物、死亡、重生时广播
+        -- 不再做周期性全量广播，大幅减少带宽和 CPU 开销
     end)
     
     local function grant2xSpeed(player)
@@ -924,27 +936,48 @@ function SnakeGameService:KnitInit()
         LeaderboardChangedSignal:Fire(state.leaderboard, state.snakes)
     end
 
+    local function grantKillAll(player)
+        if not player then return end
+        local buyerKey = uid(player.UserId)
+        local killedIds = {}
+        -- 标记所有非购买者的存活蛇为死亡
+        for k, s in pairs(snakes) do
+            if k ~= buyerKey and s.alive then
+                s.alive = false
+                table.insert(killedIds, uidNum(k))  -- 传数字 id
+            end
+        end
+        -- 广播给所有客户端：清除这些蛇的 3D 尸体，并刷新排行榜
+        KillAllSignal:Fire(killedIds)
+        local state = getGameStatePrivate()
+        LeaderboardChangedSignal:Fire(state.leaderboard, state.snakes)
+        print("[SnakeGameService] KillAll by", player.Name, "killed", #killedIds, "snakes")
+    end
+
     -- Developer Product 正确回调：ProcessReceipt
     -- 说明：购买成功后必须由服务器返回 PurchaseGranted 才会结算；这里才是权威点。
     MarketplaceService.ProcessReceipt = function(receiptInfo)
-        if receiptInfo.ProductId ~= PRODUCT_ID_2X_SPEED and receiptInfo.ProductId ~= PRODUCT_ID_2X_SIZE then
+        local pid = receiptInfo.ProductId
+        if pid ~= PRODUCT_ID_2X_SPEED and pid ~= PRODUCT_ID_2X_SIZE and pid ~= PRODUCT_ID_KILL_ALL then
             return Enum.ProductPurchaseDecision.NotProcessedYet
         end
         local player = Players:GetPlayerByUserId(receiptInfo.PlayerId)
         if not player then
             return Enum.ProductPurchaseDecision.NotProcessedYet
         end
-        if receiptInfo.ProductId == PRODUCT_ID_2X_SPEED then
+        if pid == PRODUCT_ID_2X_SPEED then
             grant2xSpeed(player)
-        elseif receiptInfo.ProductId == PRODUCT_ID_2X_SIZE then
+        elseif pid == PRODUCT_ID_2X_SIZE then
             grant2xSize(player)
+        elseif pid == PRODUCT_ID_KILL_ALL then
+            grantKillAll(player)
         end
         return Enum.ProductPurchaseDecision.PurchaseGranted
     end
 
     -- 兼容：某些环境里仍会触发 PromptProductPurchaseFinished（参数可能是 Player 或 userId）
     MarketplaceService.PromptProductPurchaseFinished:Connect(function(playerOrUserId, productId, success)
-        if (productId ~= PRODUCT_ID_2X_SPEED and productId ~= PRODUCT_ID_2X_SIZE) or not success then return end
+        if (productId ~= PRODUCT_ID_2X_SPEED and productId ~= PRODUCT_ID_2X_SIZE and productId ~= PRODUCT_ID_KILL_ALL) or not success then return end
         local player = nil
         if typeof(playerOrUserId) == "Instance" and playerOrUserId:IsA("Player") then
             player = playerOrUserId
@@ -955,6 +988,8 @@ function SnakeGameService:KnitInit()
             grant2xSpeed(player)
         elseif productId == PRODUCT_ID_2X_SIZE then
             grant2xSize(player)
+        elseif productId == PRODUCT_ID_KILL_ALL then
+            grantKillAll(player)
         end
     end)
 

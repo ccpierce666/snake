@@ -246,10 +246,18 @@ function Roui.LeaderboardRow(props)
     local rank = props.Rank or 1
     local isHighlight = props.Highlight
 
-    local avatarImage = ""
     local uidNum = tonumber(props.UserId)
+    -- 真实玩家：用自己的 Roblox 头像缩略图
+    -- AI 蛇（负数 userId）：循环使用几个 Roblox 官方内置账号头像，让每条 AI 长得不一样
+    local AI_AVATAR_IDS = { 1, 2, 3, 156, 261, 1513, 12885807, 55549140 }
+    local avatarImage
     if uidNum and uidNum > 0 then
         avatarImage = "rbxthumb://type=AvatarHeadShot&id=" .. tostring(uidNum) .. "&w=48&h=48"
+    else
+        -- 用 AI id 的绝对值对列表取模，保证同一条 AI 每次头像一致
+        local idx = (math.abs(uidNum or 0) % #AI_AVATAR_IDS) + 1
+        local realId = AI_AVATAR_IDS[idx]
+        avatarImage = "rbxthumb://type=AvatarHeadShot&id=" .. tostring(realId) .. "&w=48&h=48"
     end
 
     return el("Frame", {

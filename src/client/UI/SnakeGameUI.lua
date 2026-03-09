@@ -601,7 +601,7 @@ function SnakeGameUIRoot:render()
             Size = UDim2.new(0, 62, 0, 36),
             TextSize = 13,
             LayoutOrder = 2, 
-            onActivated = nil
+            onActivated = SnakeGameUI.Callbacks.onPurchaseKillAll
         }),
         -- Button 3: 2x Size - 未购买可点；已购买禁用
         SizeBtn = actionBtn("2x Size", has2xSize and Color3.fromRGB(100, 200, 100) or Color3.fromRGB(40, 160, 255), { 

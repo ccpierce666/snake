@@ -42,6 +42,7 @@ local SpinsChangedSignal = Knit.CreateSignal()  -- 抽奖次数更新信号
 local SpeedMultiplierChangedSignal = Knit.CreateSignal()  -- 2x 速度购买成功
 local SizeMultiplierChangedSignal = Knit.CreateSignal()   -- 2x 体型购买成功
 local KillAllSignal = Knit.CreateSignal()                 -- Kill All 购买后广播，通知所有客户端清除死亡蛇
+local SnakeSyncSignal = Knit.CreateSignal()               -- 每 3 帧广播所有蛇头坐标（轻量，替代预测）
 
 local SnakeGameService = Knit.CreateService {
     Name = "SnakeGameService",
@@ -57,6 +58,7 @@ local SnakeGameService = Knit.CreateService {
         SpeedMultiplierChanged = SpeedMultiplierChangedSignal,
         SizeMultiplierChanged = SizeMultiplierChangedSignal,
         KillAll = KillAllSignal,
+        SnakeSync = SnakeSyncSignal,
     },
 }
 
@@ -64,6 +66,7 @@ local SnakeGameService = Knit.CreateService {
 local snakes = {}
 local food = {}
 local nextFoodId = 1
+local syncFrameCounter = 0   -- 每 3 帧广播一次蛇头坐标
 local playerMoney = {}
 local playerSpins = {}
 local playerDailyGifts = {}
@@ -913,8 +916,19 @@ function SnakeGameService:KnitInit()
             end
         end
         
-        -- 排行榜和蛇数据均为事件驱动：吃食物、死亡、重生时广播
-        -- 不再做周期性全量广播，大幅减少带宽和 CPU 开销
+        -- 每 3 帧广播一次所有蛇头坐标 + 方向（轻量数据，服务端真实值）
+        -- 客户端直接用此数据更新坐标，不做预测漂移
+        syncFrameCounter = syncFrameCounter + 1
+        if syncFrameCounter >= 3 then
+            syncFrameCounter = 0
+            local headData = {}
+            for k, s in pairs(snakes) do
+                if s.alive and s.body and #s.body > 0 then
+                    headData[k] = { h = s.body[1], d = s.targetDirection or s.direction }
+                end
+            end
+            SnakeSyncSignal:Fire(headData)
+        end
     end)
     
     local function grant2xSpeed(player)

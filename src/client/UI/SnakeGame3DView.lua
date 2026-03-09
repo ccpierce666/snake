@@ -931,18 +931,7 @@ function SnakeGame3DView.UpdateSnakeData(userId, data)
         if data.isMoving ~= nil then
             snake.isMoving = data.isMoving
         end
-        -- 轻量头部坐标修正（由 DirectionChanged 事件携带，不含完整 body）
-        -- 只修正其他玩家/AI，本地玩家位置由客户端预测管理
-        if data.headPos and userId ~= localUserId and snake.body and #snake.body > 0 then
-            local serverHead = data.headPos
-            local localHead = snake.body[1]
-            local diff = (serverHead - localHead).Magnitude
-            if diff > 6 then
-                snake.body[1] = serverHead
-            elseif diff > 0.05 then
-                snake.body[1] = localHead:Lerp(serverHead, 0.35)
-            end
-        end
+        -- headPos 由 ApplyHeadSync 每 3 帧统一管理，DirectionChanged 中不再单独修正坐标
         if data.score and data.score > 0 then
             snake.logicalLength = data.score
         end
@@ -966,37 +955,52 @@ function SnakeGame3DView.UpdateSnakeData(userId, data)
             if #serverBody > 0 then
                 local localBody = snake.body or {}
 
-                -- init
                 if #localBody == 0 then
                     snake.body = serverBody
                     return
                 end
-
-                -- head correction
-                local localHead = localBody[1]
-                local serverHead = serverBody[1]
-                local diff = (serverHead - localHead).Magnitude
-                if diff > 6 then
-                    localBody[1] = serverHead
-                else
-                    localBody[1] = localHead:Lerp(serverHead, 0.35)
-                end
-
-                -- length reconcile (tail only)
-                -- 新增节段时直接使用服务器的真实坐标，避免用当前头/尾坐标填充导致"豆豆蛇"拉线
+                -- 只调整段数，坐标由 ApplyHeadSync 每 3 帧管理，防止食物事件闪现
                 local targetLen = #serverBody
                 local curLen = #localBody
                 if curLen < targetLen then
                     for i = curLen + 1, targetLen do
-                        table.insert(localBody, serverBody[i])
+                        table.insert(localBody, serverBody[i] or localBody[curLen])
                     end
                 elseif curLen > targetLen then
                     for _ = 1, (curLen - targetLen) do
                         table.remove(localBody)
                     end
                 end
-
                 snake.body = localBody
+            end
+        end
+    end
+end
+
+-- 每 3 帧由服务端广播的头部坐标，直接用服务端真实值覆盖客户端数据
+-- 其他玩家/AI：彻底消除预测漂移；本地玩家：偏差 > 3 单位时才修正（防止小抖动）
+function SnakeGame3DView.ApplyHeadSync(headData)
+    if not headData then return end
+    local localUserId = uid(Players.LocalPlayer.UserId)
+    for key, snap in pairs(headData) do
+        local userId = tostring(key)
+        local isLocal = (userId == localUserId)
+        local snake = isLocal and localPlayerSnakeState or otherSnakes[userId]
+        if snake and snake.body and #snake.body > 0 and snap.h then
+            if isLocal then
+                -- 本地玩家：极轻微 lerp 修正（5%），防止长期漂移导致食物位置不一致
+                -- 每次修正量 < 0.05 单位，肉眼不可见，不会引起镜头闪烁
+                local diff = (snap.h - snake.body[1]).Magnitude
+                if diff > 0.5 then
+                    snake.body[1] = snake.body[1]:Lerp(snap.h, 0.05)
+                end
+            else
+                -- 其他玩家/AI：直接用服务端坐标，消除漂移
+                snake.body[1] = snap.h
+                if snap.d and snap.d.Magnitude > 0.01 then
+                    snake.targetDirection = snap.d
+                    snake.isMoving = true
+                end
             end
         end
     end

@@ -254,8 +254,7 @@ function SnakeGameController:KnitStart()
         end)
     end
 
-    -- 方向同步（其他玩家 + AI），同时携带头部坐标用于位置修正
-    -- 现在是事件驱动：玩家转向时触发，AI 每 0.15~0.30s 决策时触发
+    -- 方向同步（其他玩家 + AI）：玩家转向/AI 决策时触发
     if SnakeGameService.DirectionChanged then
         SnakeGameService.DirectionChanged:Connect(function(userId, direction, isMoving, headPos)
             if userId ~= Players.LocalPlayer.UserId then
@@ -266,6 +265,13 @@ function SnakeGameController:KnitStart()
                 end
                 SnakeGame3DView.UpdateSnakeData(ukey, syncData)
             end
+        end)
+    end
+
+    -- 坐标同步（每 3 帧）：服务端真实头部坐标，直接覆盖，消除预测漂移
+    if SnakeGameService.SnakeSync then
+        SnakeGameService.SnakeSync:Connect(function(headData)
+            SnakeGame3DView.ApplyHeadSync(headData)
         end)
     end
 

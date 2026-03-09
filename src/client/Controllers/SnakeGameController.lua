@@ -32,8 +32,20 @@ function SnakeGameController:KnitStart()
         showGiftPanel = false, -- 是否显示礼物面板
         spins = 0, -- 抽奖次数
         showSpinPanel = false, -- 是否显示抽奖面板
+        speedMultiplier = 1, -- 1 或 2，Robux 购买的 2x 速度
+        sizeMultiplier = 1,  -- 1 或 2，Robux 购买的 2x 体型
     }
     local lastScore = 0
+    local lastUiUpdateAt = 0
+    local UI_UPDATE_INTERVAL = 0.25 -- 节流：每秒最多 4 次，避免 Roact 重建导致按钮点不到
+    local function safeUiUpdate()
+        local now = os.clock()
+        if now - lastUiUpdateAt < UI_UPDATE_INTERVAL then
+            return
+        end
+        lastUiUpdateAt = now
+        SnakeGameUI.Update(ClientState)
+    end
 
     -- 2. 定义回调逻辑 (Before UI Start)
     local isAutoMode = false
@@ -133,6 +145,26 @@ function SnakeGameController:KnitStart()
     SnakeGameUI.Callbacks.onRevive  = doRespawn
     SnakeGameUI.Callbacks.onRevenge = doRespawn
 
+    SnakeGameUI.Callbacks.onPurchase2xSpeed = function()
+        local svc = SnakeGameService or (Knit and Knit.GetService and Knit.GetService("SnakeGameService"))
+        if not svc then
+            warn("[SnakeGameController] 2x Speed: 服务未就绪")
+            return
+        end
+        print("[SnakeGameController] 点击 2x Speed，请求购买...")
+        pcall(function() svc:RequestPurchase2xSpeed() end)
+    end
+
+    SnakeGameUI.Callbacks.onPurchase2xSize = function()
+        local svc = SnakeGameService or (Knit and Knit.GetService and Knit.GetService("SnakeGameService"))
+        if not svc then
+            warn("[SnakeGameController] 2x Size: 服务未就绪")
+            return
+        end
+        print("[SnakeGameController] 点击 2x Size，请求购买...")
+        pcall(function() svc:RequestPurchase2xSize() end)
+    end
+
     -- 3. 初始化 UI 和 3D 视图
     SnakeGameUI.Start()
     SnakeGame3DView.Init()
@@ -177,7 +209,11 @@ function SnakeGameController:KnitStart()
                 
                 -- 获取该蛇的最新服务器坐标数据
                 local serverSnake = snakesData and snakesData[ukey]
-                local syncData = { score = score, displayLength = serverSnake and serverSnake.displayLength }
+                local syncData = {
+                    score = score,
+                    displayLength = serverSnake and serverSnake.displayLength,
+                    sizeMultiplier = serverSnake and serverSnake.sizeMultiplier,
+                }
                 if serverSnake and serverSnake.body then
                     syncData.body = serverSnake.body
                 else
@@ -200,7 +236,7 @@ function SnakeGameController:KnitStart()
 
             -- 死亡面板显示时不刷新 UI，防止打断 Respawn 按钮点击
             if not ClientState.isDead then
-                SnakeGameUI.Update(ClientState)
+                safeUiUpdate()
             end
         end)
     end
@@ -222,6 +258,23 @@ function SnakeGameController:KnitStart()
         end)
     end
     
+    -- 2x 速度购买成功
+    if SnakeGameService.SpeedMultiplierChanged then
+        SnakeGameService.SpeedMultiplierChanged:Connect(function(mult)
+            ClientState.speedMultiplier = mult or 1
+            SnakeGame3DView.SetSpeedMultiplier(ClientState.speedMultiplier)
+            safeUiUpdate()
+        end)
+    end
+
+    if SnakeGameService.SizeMultiplierChanged then
+        SnakeGameService.SizeMultiplierChanged:Connect(function(mult)
+            ClientState.sizeMultiplier = mult or 1
+            SnakeGame3DView.SetLocalSizeMultiplier(ClientState.sizeMultiplier)
+            safeUiUpdate()
+        end)
+    end
+
     -- 每日礼物更新
     if SnakeGameService.GiftUpdate then
         SnakeGameService.GiftUpdate:Connect(function(data)
@@ -305,7 +358,21 @@ function SnakeGameController:KnitStart()
                     end
                 end
 
-                -- 【临时禁用】SnakeGameUI.Update(ClientState)
+                -- 获取 2x 速度状态（已购买则持久化）
+                local ok, mult = pcall(function() return SnakeGameService:GetSpeedMultiplier() end)
+                if ok and mult and mult >= 2 then
+                    ClientState.speedMultiplier = 2
+                    SnakeGame3DView.SetSpeedMultiplier(2)
+                end
+
+                -- 获取 2x 体型状态（已购买则持久化）
+                local ok2, sm = pcall(function() return SnakeGameService:GetSizeMultiplier() end)
+                if ok2 and sm and sm >= 2 then
+                    ClientState.sizeMultiplier = 2
+                    SnakeGame3DView.SetLocalSizeMultiplier(2)
+                end
+
+                SnakeGameUI.Update(ClientState)
                 break
             else
                 print("[SnakeGameController] 获取初始状态失败 (第" .. i .. "次)，1秒后重试...")

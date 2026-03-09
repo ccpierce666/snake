@@ -45,6 +45,8 @@ local FOOD_COLORS = {
 local SNAKE_SPEED = 15
 local GAME_TICK = 1/60
 local RING_RADIUS = 5.5
+local speedMultiplier = 1  -- 1 或 2，Robux 购买的 2x 速度
+local localSizeMultiplier = 1 -- 1 或 2，Robux 购买的 2x 体型（仅本地蛇预测/圈）
 
 local localPlayerSnakeState = nil
 local snakePositions = {}
@@ -392,6 +394,14 @@ local function createEnvironment(parent)
     print("[SnakeGame3D] Low Poly 围墙生成完成")
 end
 
+function SnakeGame3DView.SetSpeedMultiplier(mult)
+    speedMultiplier = (mult == 2) and 2 or 1
+end
+
+function SnakeGame3DView.SetLocalSizeMultiplier(mult)
+    localSizeMultiplier = (mult == 2) and 2 or 1
+end
+
 function SnakeGame3DView.Init()
     if gameFolder then return end
     print("[SnakeGame3D] 初始化3D视图")
@@ -431,7 +441,7 @@ function SnakeGame3DView.Init()
 
             if dir.Magnitude > 0.1 then
                 localPlayerSnakeState.direction = dir
-                local newHead = head + dir * SNAKE_SPEED * GAME_TICK
+                local newHead = head + dir * SNAKE_SPEED * GAME_TICK * speedMultiplier
 
                 table.insert(localPlayerSnakeState.body, 1, newHead)
                 
@@ -458,7 +468,7 @@ function SnakeGame3DView.Init()
             
             -- 动态计算圈的大小 (同步服务器 PICKUP_RADIUS 逻辑)
             local currentScore = localPlayerSnakeState.displayLength or #localPlayerSnakeState.body
-            local bodySize = calculateBodySize(currentScore)
+            local bodySize = calculateBodySize(currentScore) * (localPlayerSnakeState.sizeMultiplier or localSizeMultiplier or 1)
             local currentRingRadius = 5.5 + (bodySize * 0.8) -- 稍微比蛇身大一点
             
             -- 蛇头的实际渲染位置（与 snakeParts 渲染位置一致）
@@ -526,14 +536,14 @@ function SnakeGame3DView.Init()
         end
 
         local currentLength = localPlayerSnakeState and (localPlayerSnakeState.displayLength or #localPlayerSnakeState.body) or 0
-        local bodySize = calculateBodySize(currentLength)
+        local bodySize = calculateBodySize(currentLength) * (localPlayerSnakeState and (localPlayerSnakeState.sizeMultiplier or localSizeMultiplier) or 1)
 
         if localPlayerSnakeState then
             addSnakeRenderPoints(localPlayerSnakeState.body, true, bodySize, uid(Players.LocalPlayer.UserId), localPlayerSnakeState.color)
         end
 
         for userId, s in pairs(otherSnakes) do
-            local otherBodySize = calculateBodySize(s.displayLength or #s.body)
+            local otherBodySize = calculateBodySize(s.displayLength or #s.body) * (s.sizeMultiplier or 1)
             addSnakeRenderPoints(s.body, false, otherBodySize, userId, s.color)
         end
 
@@ -585,7 +595,7 @@ function SnakeGame3DView.Init()
             if otherSnakes[userId] and otherSnakes[userId].body and #otherSnakes[userId].body > 0 then
                 local head = otherSnakes[userId].body[1]
                 local score = otherSnakes[userId].displayLength or #otherSnakes[userId].body
-                local otherBodySize = calculateBodySize(score)
+                local otherBodySize = calculateBodySize(score) * (otherSnakes[userId].sizeMultiplier or 1)
                 local currentRingRadius = 5.5 + (otherBodySize * 0.8)
                 
                 -- 蛇头的实际渲染位置（与 snakeParts 渲染位置一致）
@@ -641,7 +651,7 @@ function SnakeGame3DView.Init()
                     lastDisplayedScore[localUserId] = score
                     lastDisplayedLength[localUserId] = displayLength
                     
-                    local bodySize = calculateBodySize(displayLength)
+                    local bodySize = calculateBodySize(displayLength) * (localPlayerSnakeState.sizeMultiplier or localSizeMultiplier or 1)
                     
                     -- 根据蛇头大小动态调整标签位置
                     local labelOffsetY = 3.5 + (bodySize * 0.75)
@@ -713,7 +723,7 @@ function SnakeGame3DView.Init()
                             lastDisplayedScore[userId] = score
                             lastDisplayedLength[userId] = displayLength
                             
-                            local bodySize = calculateBodySize(displayLength)
+                            local bodySize = calculateBodySize(displayLength) * (otherSnakes[userId].sizeMultiplier or 1)
                             
                             -- 根据蛇头大小动态调整标签位置
                             local labelOffsetY = 3.5 + (bodySize * 0.75)
@@ -833,6 +843,7 @@ function SnakeGame3DView.SpawnSnake(userId, body, color)
             alive = true,
             logicalLength = 0,
             displayLength = 0,
+            sizeMultiplier = localSizeMultiplier or 1,
             color = color or Color3.fromRGB(255, 210, 60),
         }
     else
@@ -852,6 +863,7 @@ function SnakeGame3DView.SpawnSnake(userId, body, color)
             playerName = playerName,
             logicalLength = 0,
             displayLength = 0,
+            sizeMultiplier = 1,
             color = color or Color3.fromRGB(200, 200, 200),
         }
         
@@ -921,17 +933,53 @@ function SnakeGame3DView.UpdateSnakeData(userId, data)
         if data.displayLength then
             snake.displayLength = data.displayLength
         end
+        if data.sizeMultiplier then
+            snake.sizeMultiplier = data.sizeMultiplier
+            if userId == localUserId then
+                localSizeMultiplier = (data.sizeMultiplier == 2) and 2 or 1
+            end
+        end
         if data.color then
             snake.color = data.color
         end
         if data.body then
-            if userId ~= localUserId then
-                snake.body = data.body
-            else
-                -- 对于本地蛇，如果服务器更长（说明发生了生长），则采纳服务器的长度
-                if #data.body > #snake.body then
-                    snake.body = data.body
+            -- 避免吃食物/生长时整条 body 替换导致“闪现”
+            -- 策略：只校正蛇头（小偏差 lerp，大偏差 snap），长度只在尾部增减
+            local serverBody = data.body
+            if #serverBody > 0 then
+                local localBody = snake.body or {}
+
+                -- init
+                if #localBody == 0 then
+                    snake.body = serverBody
+                    return
                 end
+
+                -- head correction
+                local localHead = localBody[1]
+                local serverHead = serverBody[1]
+                local diff = (serverHead - localHead).Magnitude
+                if diff > 6 then
+                    localBody[1] = serverHead
+                else
+                    localBody[1] = localHead:Lerp(serverHead, 0.35)
+                end
+
+                -- length reconcile (tail only)
+                local targetLen = #serverBody
+                local curLen = #localBody
+                if curLen < targetLen then
+                    local tail = localBody[curLen] or localBody[curLen - 1] or localBody[1]
+                    for _ = 1, (targetLen - curLen) do
+                        table.insert(localBody, tail)
+                    end
+                elseif curLen > targetLen then
+                    for _ = 1, (curLen - targetLen) do
+                        table.remove(localBody)
+                    end
+                end
+
+                snake.body = localBody
             end
         end
     end

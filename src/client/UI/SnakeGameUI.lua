@@ -508,6 +508,10 @@ function SnakeGameUIRoot:render()
     local money = state.money or 0
     local giftData = state.giftData or { timePlayed = 0, claimed = {} }
     local autoMode = state.autoMode or false
+    local speedMultiplier = state.speedMultiplier or 1
+    local has2xSpeed = speedMultiplier >= 2
+    local sizeMultiplier = state.sizeMultiplier or 1
+    local has2xSize = sizeMultiplier >= 2
 
     local children = {}
     
@@ -582,14 +586,18 @@ function SnakeGameUIRoot:render()
             Padding = UDim.new(0, 6),
             SortOrder = Enum.SortOrder.LayoutOrder,
         }),
-        -- Button 1: 2x Speed (Boost) - Yellow
-        BoostBtn = actionBtn("2x Speed", Color3.fromRGB(255, 200, 0), { 
-            Name = "BoostButton",  
-            Size = UDim2.new(0, 52, 0, 32),
-            TextSize = 11,
-            LayoutOrder = 1, 
-            onActivated = nil
-        }),
+        -- Button 1: 2x Speed (Boost) - 未购买可点；已购买禁用
+        BoostBtn = actionBtn(
+            "2x Speed",
+            has2xSpeed and Color3.fromRGB(100, 200, 100) or Color3.fromRGB(255, 200, 0),
+            { 
+                Name = "BoostButton",  
+                Size = UDim2.new(0, 52, 0, 32),
+                TextSize = 11,
+                LayoutOrder = 1, 
+                onActivated = has2xSpeed and nil or SnakeGameUI.Callbacks.onPurchase2xSpeed
+            }
+        ),
         -- Button 2: Kill All (Bomb) - Red, Larger
         BombBtn = actionBtn("Kill All", Color3.fromRGB(255, 40, 40), { 
             Name = "BombButton",   
@@ -598,13 +606,13 @@ function SnakeGameUIRoot:render()
             LayoutOrder = 2, 
             onActivated = nil
         }),
-        -- Button 3: Magnet (Styled like 2x Size) - Blue
-        MagnetBtn = actionBtn("Magnet", Color3.fromRGB(40, 160, 255), { 
+        -- Button 3: 2x Size - 未购买可点；已购买禁用
+        SizeBtn = actionBtn("2x Size", has2xSize and Color3.fromRGB(100, 200, 100) or Color3.fromRGB(40, 160, 255), { 
             Name = "MagnetButton", 
             Size = UDim2.new(0, 52, 0, 32),
             TextSize = 11,
             LayoutOrder = 3, 
-            onActivated = nil
+            onActivated = has2xSize and nil or SnakeGameUI.Callbacks.onPurchase2xSize
         }),
         -- Button 4: Auto - Green/Red
         AutoBtn = actionBtn(

@@ -70,6 +70,18 @@ local playerSkinColors = {} -- [userId] = Color3，玩家专属初始颜色
 local playerSpeedMultiplier = {} -- [uid] = 1 或 2，Robux 购买的 2x 速度
 local playerSizeMultiplier = {} -- [uid] = 1 或 2，Robux 购买的 2x 体型
 
+-- AI 蛇
+local AI_TARGET_COUNT = 3
+local aiNextId = -1000
+local aiKeys = {} -- [key] = true
+local aiNamePool = {
+    "Alex","Bella","Chris","Daisy","Ethan","Fiona","Gavin","Hazel","Ivy","Jack",
+    "Kara","Liam","Mia","Noah","Olivia","Piper","Quinn","Ryan","Sofia","Tyler",
+    "Uma","Violet","Wyatt","Xander","Yara","Zoe","Leo","Nina","Owen","Ruby",
+    "Sam","Tina","Vince","Will","Yuki","Aiden","Coco","Duke","Elsa","Flynn",
+    "Gigi","Hank","Jade","Kiki","Lola","Max","Nova","Rex","Skye","Zane",
+}
+
 -- 皮肤颜色池：黄、白、蓝、橙、红
 local SKIN_COLOR_POOL = {
     Color3.fromRGB(255, 210, 60),  -- 黄
@@ -134,8 +146,15 @@ local function getLeaderboard()
     local list = {}
     for k, s in pairs(snakes) do
         if s.alive then
+            local numId = uidNum(k)
+            local name = s.playerName
+            if not name then
+                local p = (numId and numId > 0) and Players:GetPlayerByUserId(numId) or nil
+                name = (p and p.Name) or "AI"
+            end
             table.insert(list, { 
-                userId = uidNum(k),  -- 客户端需要数字 userId（用于头像加载等）
+                userId = numId,  -- 客户端需要数字 userId（用于头像加载等；AI 为负数）
+                name = name,
                 score = s.score or 0, 
                 kills = s.kills or 0, 
                 length = s.displayLength or #s.body,
@@ -291,7 +310,13 @@ function SnakeGameService:AddSnakeLength(userId, amount)
     -- 如果当前帧数不足，则补充 growthPending
     if currentFrameCount < targetFrameCount then
         local diff = targetFrameCount - currentFrameCount
-        s.growthPending = (s.growthPending or 0) + diff
+        -- 关键：不要把 diff 叠加到 infinity（AI 连续吃会导致尾巴永远不动）
+        -- growthPending 表示“还差多少帧长度”，取 max 即可，避免每次吃都无限累积。
+        s.growthPending = math.max((s.growthPending or 0), diff)
+        -- AI：限制连续生长窗口，避免尾巴长时间停在出生点形成超长直线
+        if s.isAI then
+            s.growthPending = math.min(s.growthPending, 90)
+        end
     end
     
     -- 清空旧的积分逻辑，避免冲突
@@ -416,10 +441,12 @@ function SnakeGameService:GetGameState()
     local state = { snakes = {}, food = food, leaderboard = getLeaderboard() }
     for k, s in pairs(snakes) do
         state.snakes[k] = {
-            body = s.body, direction = s.direction, isMoving = s.isMoving,
+            body = s.body, direction = s.targetDirection or s.direction, isMoving = s.isMoving,
             score = s.score, alive = s.alive,
             displayLength = s.displayLength or #s.body,
             sizeMultiplier = playerSizeMultiplier[k] or 1,
+            playerName = s.playerName,
+            isAI = s.isAI or false,
             color = playerSkinColors[k],
         }
     end
@@ -571,10 +598,12 @@ local function getGameStatePrivate()
     for k, s in pairs(snakes) do
         -- k 本身就是 "uXXXXXX"，直接作为广播 key
         state.snakes[k] = {
-            body = s.body, direction = s.direction, isMoving = s.isMoving,
+            body = s.body, direction = s.targetDirection or s.direction, isMoving = s.isMoving,
             score = s.score, alive = s.alive,
             displayLength = s.displayLength or #s.body,
             sizeMultiplier = playerSizeMultiplier[k] or 1,
+            playerName = s.playerName,
+            isAI = s.isAI or false,
             color = playerSkinColors[k],
         }
     end
@@ -585,6 +614,65 @@ local function moveSnakes()
     for k, s in pairs(snakes) do
         -- k 是 "uXXXXXX" 格式；需要数字 userId 时用 uidNum(k)
         if s.alive and s.isMoving then
+            -- AI 自动寻路吃食物（类似 Auto 功能）
+            if s.isAI and s.body and #s.body > 0 then
+                local now = os.clock()
+                local head = s.body[1]
+
+                -- 低频思考：避免每帧锁死直线目标
+                if not s.aiNextThinkAt or now >= s.aiNextThinkAt then
+                    s.aiNextThinkAt = now + 0.15 + math.random() * 0.15 -- 0.15~0.30s
+
+                    -- 选一个目标食物（优先近的，但加入抖动偏移）
+                    local best = nil
+                    local bestDist = math.huge
+                    for i = 1, #food do
+                        local f = food[i]
+                        local d = (f.pos - head).Magnitude
+                        if d < bestDist then
+                            bestDist = d
+                            best = f
+                        end
+                    end
+
+                    local desired = nil
+                    if best then
+                        -- 给目标点加一点随机偏移，避免完全直线
+                        local jitter = Vector3.new((math.random() - 0.5) * 18, 0, (math.random() - 0.5) * 18)
+                        local aim = best.pos + jitter
+                        local v = (aim - head)
+                        if v.Magnitude > 0.1 then
+                            desired = v.Unit
+                        end
+                    end
+
+                    if not desired then
+                        -- 没食物/太近：随机游走方向（持续一小段时间）
+                        desired = Vector3.new(math.random()*2-1, 0, math.random()*2-1)
+                        if desired.Magnitude > 0.1 then desired = desired.Unit end
+                    end
+
+                    s.aiDesiredDirection = desired
+                end
+
+                -- 转向速率限制：逐渐转向 desired，形成曲线而不是直线拉扯
+                local desired = s.aiDesiredDirection or s.targetDirection
+                local cur = s.targetDirection or Vector3.new(1, 0, 0)
+                if desired and desired.Magnitude > 0.1 then
+                    -- 给 AI 加一点“摆动”，让轨迹更像真人手感，不是完美直线
+                    s.aiWobbleT = (s.aiWobbleT or 0) + 0.12
+                    local wobble = Vector3.new(math.cos(s.aiWobbleT), 0, math.sin(s.aiWobbleT))
+                    local newDesired = (desired + wobble * 0.18)
+                    if newDesired.Magnitude > 0.1 then newDesired = newDesired.Unit end
+
+                    local turn = 0.14 -- 稍慢一些，轨迹更弯
+                    local newDir = (cur:Lerp(newDesired, turn))
+                    if newDir.Magnitude > 0.1 then
+                        s.targetDirection = newDir.Unit
+                    end
+                    s.isMoving = true
+                end
+            end
             local head = s.body[1]
             local mult = playerSpeedMultiplier[k] or 1
             local nextHead = head + s.targetDirection * SNAKE_SPEED * GAME_TICK * mult
@@ -607,16 +695,34 @@ local function moveSnakes()
                 local f = food[i]
                 local dist = (nextHead - f.pos).Magnitude
                 if dist < pickupRange then
+                    -- AI：限制吞食频率，避免持续生长导致尾巴“钉在出生点”
+                    if s.isAI then
+                        local now = os.clock()
+                        if (s.aiEatCooldownUntil or 0) > now then
+                            -- 跳过本次吞食
+                            continue
+                        end
+                        s.aiEatCooldownUntil = now + 0.45 -- 更像真人：每秒最多 ~2 次吞食
+                    end
+
                     local growth = FOOD_GROWTH_MAP[f.value or 1] or 2
                     SnakeGameService:AddSnakeLength(uidNum(k), growth)
                     
-                    -- 每吃 1 个食物获得 1 金钱 (1:1)
-                    playerMoney[k] = (playerMoney[k] or 0) + 1
-                    local p = Players:GetPlayerByUserId(uidNum(k))
-                    if p then MoneyChangedSignal:FireTo(p, playerMoney[k]) end
+                    -- 每吃 1 个食物获得 1 金钱 (1:1)（AI 不累计金钱）
+                    if not s.isAI then
+                        playerMoney[k] = (playerMoney[k] or 0) + 1
+                        local pid = uidNum(k)
+                        local p = (pid and pid > 0) and Players:GetPlayerByUserId(pid) or nil
+                        if p then MoneyChangedSignal:FireTo(p, playerMoney[k]) end
+                    end
                     
                     table.remove(food, i)
                     foodEaten = true
+
+                    -- AI：每次只吃 1 个，避免瞬间扫一片导致长直线
+                    if s.isAI then
+                        break
+                    end
                 end
             end
             
@@ -645,9 +751,12 @@ local function moveSnakes()
                                     local lostLength = s.displayLength or #s.body
                                     s.alive = false
                                     
-                                    local killerPlayer = Players:GetPlayerByUserId(uidNum(otherK))
-                                    local killerName = killerPlayer and killerPlayer.Name or "Unknown"
-                                    local victim = Players:GetPlayerByUserId(uidNum(k))
+                                    local killerSnake = snakes[otherK]
+                                    local killerPid = uidNum(otherK)
+                                    local killerPlayer = (killerPid and killerPid > 0) and Players:GetPlayerByUserId(killerPid) or nil
+                                    local killerName = (killerSnake and killerSnake.playerName) or (killerPlayer and killerPlayer.Name) or "Unknown"
+                                    local victimPid = uidNum(k)
+                                    local victim = (victimPid and victimPid > 0) and Players:GetPlayerByUserId(victimPid) or nil
                                     
                                     -- 广播给所有客户端：小蛇死亡，所有人移除该蛇的 3D 尸体；victimUserId 用于客户端判断是否显示 You are dead
                                     SnakeDiedSignal:Fire({
@@ -666,14 +775,17 @@ local function moveSnakes()
                                     local lostLength = otherSnake.displayLength or #otherSnake.body
                                     otherSnake.alive = false
                                     
-                                    local victim = Players:GetPlayerByUserId(uidNum(otherK))
-                                    local victimName = victim and victim.Name or "Unknown"
-                                    local killer = Players:GetPlayerByUserId(uidNum(k))
+                                    local victimPid = uidNum(otherK)
+                                    local victim = (victimPid and victimPid > 0) and Players:GetPlayerByUserId(victimPid) or nil
+                                    local victimName = (otherSnake and otherSnake.playerName) or (victim and victim.Name) or "Unknown"
+                                    local killerSnake = snakes[k]
+                                    local killerPid = uidNum(k)
+                                    local killer = (killerPid and killerPid > 0) and Players:GetPlayerByUserId(killerPid) or nil
                                     
                                     -- 广播给所有客户端：小蛇死亡，所有人移除该蛇的 3D 尸体
                                     SnakeDiedSignal:Fire({
                                         victimUserId = uidNum(otherK),
-                                        killedBy = killer and killer.Name or "Unknown",
+                                        killedBy = (killerSnake and killerSnake.playerName) or (killer and killer.Name) or "Unknown",
                                         lostSize = lostLength,
                                     })
                                     if victim then
@@ -689,6 +801,9 @@ local function moveSnakes()
                 end
             end
             
+            -- AI 和真实玩家使用完全相同的尾巴逻辑：
+            -- growthPending > 0 时只减计数，不移除尾巴（蛇头插入 = 蛇体延长）
+            -- growthPending == 0 时正常移除尾巴（蛇尾跟着往前走）
             if (s.growthPending or 0) > 0 then
                 s.growthPending = s.growthPending - 1
             else
@@ -703,7 +818,75 @@ function SnakeGameService:KnitInit()
     local baseplate = workspace:FindFirstChild("Baseplate")
     if baseplate then baseplate:Destroy() end
 
+    local function spawnAiSnake()
+        -- pick name (avoid duplicates among alive AI)
+        local used = {}
+        for k, s in pairs(snakes) do
+            if s.alive and s.isAI and s.playerName then
+                used[s.playerName] = true
+            end
+        end
+        local name = nil
+        for _ = 1, 20 do
+            local n = aiNamePool[math.random(1, #aiNamePool)]
+            if not used[n] then name = n break end
+        end
+        name = name or ("AI" .. tostring(math.random(100,999)))
+
+        aiNextId -= 1
+        local numId = aiNextId
+        local key = uid(numId)
+        aiKeys[key] = true
+
+        local pos = Vector3.new((math.random()*2-1)*120, 0, (math.random()*2-1)*120)
+        snakes[key] = {
+            body = { pos },
+            direction = Vector3.new(1, 0, 0),
+            targetDirection = Vector3.new(math.random()*2-1, 0, math.random()*2-1).Unit,
+            isMoving = true,
+            score = 0,
+            alive = true,
+            growthPending = 0,
+            pendingGrowthScore = 0,
+            displayLength = INITIAL_LENGTH,
+            playerName = name,
+            isAI = true,
+        }
+
+        playerMoney[key] = nil
+        playerFoodCounts[key] = 0
+        playerSpeedMultiplier[key] = 1
+        playerSizeMultiplier[key] = 1
+        assignSkinColor(numId)
+
+        -- 广播生成（客户端用 key 渲染）
+        SnakeSpawnedSignal:Fire(numId, snakes[key].body, playerSkinColors[key])
+    end
+
+    local function maintainAiSnakes()
+        local aliveCount = 0
+        for k, s in pairs(snakes) do
+            if s.isAI then
+                if not s.alive then
+                    -- 移除死亡 AI，腾位置
+                    snakes[k] = nil
+                    aiKeys[k] = nil
+                    playerSkinColors[k] = nil
+                    playerSpeedMultiplier[k] = nil
+                    playerSizeMultiplier[k] = nil
+                else
+                    aliveCount += 1
+                end
+            end
+        end
+        while aliveCount < AI_TARGET_COUNT do
+            spawnAiSnake()
+            aliveCount += 1
+        end
+    end
+
     RunService.Heartbeat:Connect(function()
+        maintainAiSnakes()
         moveSnakes()
         -- 提高生成速度：每次检查多次，以便快速达到高上限
         if #food < MAX_FOOD then

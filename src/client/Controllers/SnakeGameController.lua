@@ -213,14 +213,14 @@ function SnakeGameController:KnitStart()
                     score = score,
                     displayLength = serverSnake and serverSnake.displayLength,
                     sizeMultiplier = serverSnake and serverSnake.sizeMultiplier,
+                    playerName = serverSnake and serverSnake.playerName,
                 }
-                if serverSnake and serverSnake.body then
-                    syncData.body = serverSnake.body
-                else
-                    -- 没有 body 数据时补充 dir/isMoving（避免 3DView 丢失方向信息）
-                    if serverSnake then
-                        syncData.dir = serverSnake.direction
-                        syncData.isMoving = serverSnake.isMoving
+                if serverSnake then
+                    -- isMoving 和 dir 必须无论是否有 body 都要同步，否则客户端预测循环永远不启动
+                    syncData.isMoving = serverSnake.isMoving
+                    syncData.dir = serverSnake.direction
+                    if serverSnake.body then
+                        syncData.body = serverSnake.body
                     end
                 end
                 if serverSnake and serverSnake.color then syncData.color = serverSnake.color end

@@ -914,6 +914,10 @@ function SnakeGame3DView.UpdateSnakeData(userId, data)
     
     -- Update Direction, logical length AND body length
     if snake then
+        -- 服务器可直接下发名字（用于 AI）
+        if data.playerName and data.playerName ~= "" then
+            snake.playerName = data.playerName
+        end
         -- 记录玩家名字（确保总是有最新的，如果还是Unknown就继续尝试）
         if not snake.playerName or snake.playerName == "Unknown" then
             local player = Players:GetPlayerByUserId(uidNum(userId))
@@ -924,6 +928,8 @@ function SnakeGame3DView.UpdateSnakeData(userId, data)
         
         if data.dir then
             snake.targetDirection = data.dir
+        end
+        if data.isMoving ~= nil then
             snake.isMoving = data.isMoving
         end
         if data.score and data.score > 0 then
@@ -966,12 +972,12 @@ function SnakeGame3DView.UpdateSnakeData(userId, data)
                 end
 
                 -- length reconcile (tail only)
+                -- 新增节段时直接使用服务器的真实坐标，避免用当前头/尾坐标填充导致"豆豆蛇"拉线
                 local targetLen = #serverBody
                 local curLen = #localBody
                 if curLen < targetLen then
-                    local tail = localBody[curLen] or localBody[curLen - 1] or localBody[1]
-                    for _ = 1, (targetLen - curLen) do
-                        table.insert(localBody, tail)
+                    for i = curLen + 1, targetLen do
+                        table.insert(localBody, serverBody[i])
                     end
                 elseif curLen > targetLen then
                     for _ = 1, (curLen - targetLen) do

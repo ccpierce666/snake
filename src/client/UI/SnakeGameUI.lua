@@ -155,10 +155,7 @@ local function buildLeaderboard(state)
 
     for i, e in ipairs(state.leaderboard or {}) do
         if i <= 4 then
-            local name = "Player"
-            for _, p in ipairs(Players:GetPlayers()) do
-                if p.UserId == e.userId then name = p.Name break end
-            end
+            local name = e.name or "Player"
             children["Row" .. i] = Roui.LeaderboardRow({
                 Rank = i,
                 Name = name:sub(1, 10),

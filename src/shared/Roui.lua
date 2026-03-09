@@ -247,8 +247,9 @@ function Roui.LeaderboardRow(props)
     local isHighlight = props.Highlight
 
     local avatarImage = ""
-    if props.UserId then
-        avatarImage = "rbxthumb://type=AvatarHeadShot&id=" .. tostring(props.UserId) .. "&w=48&h=48"
+    local uidNum = tonumber(props.UserId)
+    if uidNum and uidNum > 0 then
+        avatarImage = "rbxthumb://type=AvatarHeadShot&id=" .. tostring(uidNum) .. "&w=48&h=48"
     end
 
     return el("Frame", {

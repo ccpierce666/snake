@@ -239,16 +239,20 @@ function SnakeGameController:KnitStart()
         end)
     end
     
-    -- 蛇死亡信号
+    -- 蛇死亡信号（服务器广播给所有客户端：所有人移除该蛇尸体，仅受害者显示 You are dead）
     if SnakeGameService.SnakeDied then
         SnakeGameService.SnakeDied:Connect(function(deathData)
-            ClientState.isDead = true
-            ClientState.killedBy = deathData.killedBy or "Unknown"
-            ClientState.lostSize = deathData.lostSize or 0
-            -- 移除当前蛇的 3D 视图
-            SnakeGame3DView.RemoveSnake(uid(Players.LocalPlayer.UserId))
-            SnakeGameUI.Update(ClientState)
-            print("[SnakeGameController] 玩家死亡: " .. ClientState.killedBy .. ", 损失: " .. ClientState.lostSize)
+            local victimUserId = deathData.victimUserId
+            if not victimUserId then return end
+            -- 所有客户端都移除死亡蛇的 3D 尸体，大蛇屏幕上小蛇尸体消失
+            SnakeGame3DView.RemoveSnake(uid(victimUserId))
+            -- 只有被吃的玩家自己才显示死亡界面，并需要点重生
+            if victimUserId == Players.LocalPlayer.UserId then
+                ClientState.isDead = true
+                ClientState.killedBy = deathData.killedBy or "Unknown"
+                ClientState.lostSize = deathData.lostSize or 0
+                SnakeGameUI.Update(ClientState)
+            end
         end)
     end
 

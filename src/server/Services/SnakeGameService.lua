@@ -547,11 +547,13 @@ local function moveSnakes()
                                     local killerName = killerPlayer and killerPlayer.Name or "Unknown"
                                     local victim = Players:GetPlayerByUserId(uidNum(k))
                                     
+                                    -- 广播给所有客户端：小蛇死亡，所有人移除该蛇的 3D 尸体；victimUserId 用于客户端判断是否显示 You are dead
+                                    SnakeDiedSignal:Fire({
+                                        victimUserId = uidNum(k),
+                                        killedBy = killerName,
+                                        lostSize = lostLength,
+                                    })
                                     if victim then
-                                        SnakeDiedSignal:FireTo(victim, {
-                                            killedBy = killerName,
-                                            lostSize = lostLength,
-                                        })
                                         print("[SnakeGameService] Player " .. victim.Name .. " died to " .. killerName .. ", lost " .. lostLength)
                                     end
                                     
@@ -566,11 +568,13 @@ local function moveSnakes()
                                     local victimName = victim and victim.Name or "Unknown"
                                     local killer = Players:GetPlayerByUserId(uidNum(k))
                                     
+                                    -- 广播给所有客户端：小蛇死亡，所有人移除该蛇的 3D 尸体
+                                    SnakeDiedSignal:Fire({
+                                        victimUserId = uidNum(otherK),
+                                        killedBy = killer and killer.Name or "Unknown",
+                                        lostSize = lostLength,
+                                    })
                                     if victim then
-                                        SnakeDiedSignal:FireTo(victim, {
-                                            killedBy = killer and killer.Name or "Unknown",
-                                            lostSize = lostLength,
-                                        })
                                         print("[SnakeGameService] Player " .. victimName .. " died to " .. (killer and killer.Name or "Unknown") .. ", lost " .. lostLength)
                                     end
                                     

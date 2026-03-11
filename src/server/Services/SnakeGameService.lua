@@ -27,6 +27,10 @@ local PRODUCT_ID_2X_SPEED = 3552817506
 local PRODUCT_ID_2X_SIZE = 3552878046
 -- Developer Product: Kill All (Robux 购买)
 local PRODUCT_ID_KILL_ALL = 3552907357
+-- Developer Product: Revive（死亡后恢复长度）
+local PRODUCT_ID_REVIVE = 3553463580
+-- Developer Product: Revenge（杀死杀了你的人）
+local PRODUCT_ID_REVENGE = 3553474649
 
 local Knit = _G.KnitInstance or require(ReplicatedStorage.Common.Knit)
 
@@ -74,6 +78,8 @@ local playerFoodCounts = {} -- 用于记录吃食物数量
 local playerSkinColors = {} -- [userId] = Color3，玩家专属初始颜色
 local playerSpeedMultiplier = {} -- [uid] = 1 或 2，Robux 购买的 2x 速度
 local playerSizeMultiplier = {} -- [uid] = 1 或 2，Robux 购买的 2x 体型
+local playerPendingRevive = {} -- [uid] = lostSize，死亡时暂存，购买 Revive 后恢复
+local playerPendingRevenge = {} -- [uid] = killerUid，死亡时暂存，购买 Revenge 后杀死目标
 
 -- AI 蛇
 local AI_TARGET_COUNT = 3
@@ -389,7 +395,7 @@ function SnakeGameService:RequestRespawn(player)
         pendingGrowthScore = 0,
         displayLength = INITIAL_LENGTH
     }
-    SnakeSpawnedSignal:Fire(player.UserId, body, assignSkinColor(player.UserId))
+    SnakeSpawnedSignal:Fire(player.UserId, body, assignSkinColor(player.UserId), INITIAL_LENGTH)
     
     -- 玩家重生时也发送排行榜更新
     local state = self:GetGameState()
@@ -470,6 +476,52 @@ function SnakeGameService.Client:GetSpins(player) return playerSpins[uid(player.
 function SnakeGameService.Client:GetGameState(p) return self.Server:GetGameState() end
 function SnakeGameService.Client:ChangeDirection(p, d) self.Server:ChangeDirection(p, d) end
 function SnakeGameService.Client:RequestRespawn(p) self.Server:RequestRespawn(p) end
+
+function SnakeGameService:RequestRevive(player, lostSize)
+    local score = math.max(INITIAL_LENGTH, tonumber(lostSize) or 0)
+    local sizeMult = playerSizeMultiplier[uid(player.UserId)] or 1
+
+    -- 按 score 计算目标视觉节数（与 AddSnakeLength 同一套公式）
+    local function calcTargetSegments(sc)
+        if sc < 300      then return 2 + math.floor(sc / 50)
+        elseif sc < 1000 then return 8  + math.floor((sc - 300)  / 100)
+        elseif sc < 2000 then return 15 + math.floor((sc - 1000) / 200)
+        else                  return 20 + math.floor((sc - 2000) / 300)
+        end
+    end
+
+    local visualSize    = calculateVisualBodySize(score) * sizeMult
+    local spacing       = visualSize * 0.6
+    local speedPerFrame = SNAKE_SPEED * GAME_TICK   -- 0.25
+    local targetSegs    = calcTargetSegments(score)
+    local targetFrames  = math.ceil((targetSegs * spacing) / speedPerFrame)
+    targetFrames = math.max(targetFrames, INITIAL_LENGTH)
+
+    -- 直接生成正确长度的 body（蛇尾向 -X 方向排列）
+    local pos  = Vector3.new((math.random() * 2 - 1) * 80, 0, (math.random() * 2 - 1) * 80)
+    local body = { pos }
+    for i = 1, targetFrames - 1 do
+        table.insert(body, pos - Vector3.new(speedPerFrame * i, 0, 0))
+    end
+
+    snakes[uid(player.UserId)] = {
+        body               = body,
+        direction          = Vector3.new(1, 0, 0),
+        targetDirection    = Vector3.new(0, 0, 0),
+        isMoving           = false,
+        score              = score,
+        alive              = true,
+        growthPending      = 0,
+        pendingGrowthScore = 0,
+        displayLength      = score,
+    }
+
+    SnakeSpawnedSignal:Fire(player.UserId, body, assignSkinColor(player.UserId), score)
+    local state = self:GetGameState()
+    LeaderboardChangedSignal:Fire(state.leaderboard, state.snakes)
+    print("[SnakeGameService] Revive: score=" .. score .. " frames=" .. targetFrames)
+end
+function SnakeGameService.Client:RequestRevive(p, lostSize) self.Server:RequestRevive(p, lostSize) end
 function SnakeGameService.Client:GetSpeedMultiplier(p)
     return playerSpeedMultiplier[uid(p.UserId)] or 1
 end
@@ -530,6 +582,37 @@ function SnakeGameService:RequestPurchaseKillAll(player)
     MarketplaceService:PromptProductPurchase(player, PRODUCT_ID_KILL_ALL)
     return true
 end
+
+function SnakeGameService:RequestPurchaseRevive(player, clientLostSize)
+    -- 客户端传来的 lostSize 作为最可靠的来源（来自服务端广播的死亡数据）
+    local size = tonumber(clientLostSize) or 0
+    local key = uid(player.UserId)
+    if size > 0 then
+        playerPendingRevive[key] = size
+        print("[SnakeGameService] RequestPurchaseRevive: player=" .. player.Name .. " lostSize=" .. size)
+    else
+        -- 也尝试从已存的 pendingRevive 读取
+        size = playerPendingRevive[key] or 0
+        print("[SnakeGameService] RequestPurchaseRevive: player=" .. player.Name .. " stored lostSize=" .. size)
+    end
+    MarketplaceService:PromptProductPurchase(player, PRODUCT_ID_REVIVE)
+    return true
+end
+function SnakeGameService.Client:RequestPurchaseRevive(p, clientLostSize) self.Server:RequestPurchaseRevive(p, clientLostSize) end
+
+function SnakeGameService:RequestPurchaseRevenge(player, clientKillerUid)
+    -- 客户端传来的 killerUid 作为最可靠的来源（来自服务端广播的死亡数据）
+    local key = uid(player.UserId)
+    if clientKillerUid and clientKillerUid ~= "" then
+        playerPendingRevenge[key] = tostring(clientKillerUid)
+        print("[SnakeGameService] RequestPurchaseRevenge: player=" .. player.Name .. " target=" .. clientKillerUid)
+    else
+        print("[SnakeGameService] RequestPurchaseRevenge: player=" .. player.Name .. " stored target=" .. tostring(playerPendingRevenge[key]))
+    end
+    MarketplaceService:PromptProductPurchase(player, PRODUCT_ID_REVENGE)
+    return true
+end
+function SnakeGameService.Client:RequestPurchaseRevenge(p, clientKillerUid) self.Server:RequestPurchaseRevenge(p, clientKillerUid) end
 
 -------------------------------------------------------------------------------
 -- 核心循环
@@ -753,69 +836,88 @@ local function moveSnakes()
                 LeaderboardChangedSignal:Fire(state.leaderboard, state.snakes)
             end
             
-            -- 蛇与蛇碰撞检测
+            -- 蛇与蛇碰撞检测：只检测头对头，撞身体直接穿过
             for otherK, otherSnake in pairs(snakes) do
-                if otherK ~= k and otherSnake.alive then
+                if otherK ~= k and otherSnake.alive and #otherSnake.body > 0 then
                     local otherScore = otherSnake.score or 0
                     local currentScore = s.score or 0
                     local otherHeadRadius = calculateSnakeRadius(otherScore) * (playerSizeMultiplier[otherK] or 1)
-                    local collisionDistance = radius + otherHeadRadius
-                    
-                    -- 检测当前蛇的头部与其他蛇的身体碰撞
-                    for bodyIdx, bodySegment in ipairs(otherSnake.body) do
-                        if bodyIdx > 1 then
-                            local dist = (nextHead - bodySegment).Magnitude
-                            if dist < collisionDistance then
-                                if otherScore > currentScore then
-                                    -- 对方更大，当前蛇死亡
-                                    local lostLength = s.displayLength or #s.body
-                                    s.alive = false
-                                    
-                                    local killerSnake = snakes[otherK]
-                                    local killerPid = uidNum(otherK)
-                                    local killerPlayer = (killerPid and killerPid > 0) and Players:GetPlayerByUserId(killerPid) or nil
-                                    local killerName = (killerSnake and killerSnake.playerName) or (killerPlayer and killerPlayer.Name) or "Unknown"
-                                    local victimPid = uidNum(k)
-                                    local victim = (victimPid and victimPid > 0) and Players:GetPlayerByUserId(victimPid) or nil
-                                    
-                                    -- 广播给所有客户端：小蛇死亡，所有人移除该蛇的 3D 尸体；victimUserId 用于客户端判断是否显示 You are dead
-                                    SnakeDiedSignal:Fire({
-                                        victimUserId = uidNum(k),
-                                        killedBy = killerName,
-                                        lostSize = lostLength,
-                                    })
-                                    if victim then
-                                        print("[SnakeGameService] Player " .. victim.Name .. " died to " .. killerName .. ", lost " .. lostLength)
-                                    end
-                                    
-                                    SnakeGameService:AddSnakeLength(uidNum(otherK), lostLength)
-                                    break
-                                elseif currentScore > otherScore then
-                                    -- 当前蛇更大，其他蛇死亡
-                                    local lostLength = otherSnake.displayLength or #otherSnake.body
-                                    otherSnake.alive = false
-                                    
-                                    local victimPid = uidNum(otherK)
-                                    local victim = (victimPid and victimPid > 0) and Players:GetPlayerByUserId(victimPid) or nil
-                                    local victimName = (otherSnake and otherSnake.playerName) or (victim and victim.Name) or "Unknown"
-                                    local killerSnake = snakes[k]
-                                    local killerPid = uidNum(k)
-                                    local killer = (killerPid and killerPid > 0) and Players:GetPlayerByUserId(killerPid) or nil
-                                    
-                                    -- 广播给所有客户端：小蛇死亡，所有人移除该蛇的 3D 尸体
-                                    SnakeDiedSignal:Fire({
-                                        victimUserId = uidNum(otherK),
-                                        killedBy = (killerSnake and killerSnake.playerName) or (killer and killer.Name) or "Unknown",
-                                        lostSize = lostLength,
-                                    })
-                                    if victim then
-                                        print("[SnakeGameService] Player " .. victimName .. " died to " .. (killer and killer.Name or "Unknown") .. ", lost " .. lostLength)
-                                    end
-                                    
-                                    SnakeGameService:AddSnakeLength(uidNum(k), lostLength)
-                                    break
+                    local headCollisionDist = radius + otherHeadRadius
+
+                    -- 只检测头对头
+                    local otherHead = otherSnake.body[1]
+                    local dist = (nextHead - otherHead).Magnitude
+                    if dist < headCollisionDist then
+                        local killerSnake, victimKey, victimSnake, killerKey
+
+                        if currentScore > otherScore then
+                            -- 当前蛇更大：对方死
+                            killerKey   = k
+                            killerSnake = s
+                            victimKey   = otherK
+                            victimSnake = otherSnake
+                        elseif otherScore > currentScore then
+                            -- 对方更大：当前蛇死
+                            killerKey   = otherK
+                            killerSnake = otherSnake
+                            victimKey   = k
+                            victimSnake = s
+                        else
+                            -- 大小相同：两条都死
+                            local function killSnake(vKey, vSnake, kKey, kSnake)
+                                local lostLength = vSnake.displayLength or #vSnake.body
+                                vSnake.alive = false
+                                -- 记录死前长度，供 Revive 产品使用
+                                local vPid = uidNum(vKey)
+                                if vPid and vPid > 0 then
+                                    playerPendingRevive[uid(vPid)] = lostLength
+                                    -- 记录凶手 uid，供 Revenge 产品使用
+                                    playerPendingRevenge[uid(vPid)] = kKey
                                 end
+                                local killerName = (kSnake and kSnake.playerName) or "Unknown"
+                                SnakeDiedSignal:Fire({
+                                    victimUserId = uidNum(vKey),
+                                    killedBy = killerName,
+                                    killerUid = kKey,
+                                    lostSize = lostLength,
+                                })
                             end
+                            -- 避免重复处理（只在当前蛇的 key 更小时执行，防止双向各触发一次）
+                            if k < otherK then
+                                killSnake(k, s, otherK, otherSnake)
+                                killSnake(otherK, otherSnake, k, s)
+                                -- 无人获得奖励（同归于尽）
+                            end
+                            break
+                        end
+
+                        if killerKey and victimKey then
+                            local lostLength = victimSnake.displayLength or #victimSnake.body
+                            victimSnake.alive = false
+
+                            -- 记录死前长度，供 Revive 产品使用；记录凶手，供 Revenge 产品使用
+                            local victimPid = uidNum(victimKey)
+                            if victimPid and victimPid > 0 then
+                                playerPendingRevive[uid(victimPid)] = lostLength
+                                playerPendingRevenge[uid(victimPid)] = killerKey
+                            end
+
+                            local killerPid = uidNum(killerKey)
+                            local killerPlayer = (killerPid and killerPid > 0) and Players:GetPlayerByUserId(killerPid) or nil
+                            local killerName = (killerSnake and killerSnake.playerName) or (killerPlayer and killerPlayer.Name) or "Unknown"
+                            local victim = (victimPid and victimPid > 0) and Players:GetPlayerByUserId(victimPid) or nil
+                            local victimName = (victimSnake and victimSnake.playerName) or (victim and victim.Name) or "Unknown"
+
+                            SnakeDiedSignal:Fire({
+                                victimUserId = uidNum(victimKey),
+                                killedBy = killerName,
+                                killerUid = killerKey,
+                                lostSize = lostLength,
+                            })
+                            print("[SnakeGameService] " .. victimName .. " died to " .. killerName .. " (head-to-head), lost " .. lostLength)
+
+                            SnakeGameService:AddSnakeLength(uidNum(killerKey), lostLength)
+                            break
                         end
                     end
                 end
@@ -880,7 +982,7 @@ function SnakeGameService:KnitInit()
         assignSkinColor(numId)
 
         -- 广播生成（客户端用 key 渲染）
-        SnakeSpawnedSignal:Fire(numId, snakes[key].body, playerSkinColors[key])
+        SnakeSpawnedSignal:Fire(numId, snakes[key].body, playerSkinColors[key], INITIAL_LENGTH)
     end
 
     local function maintainAiSnakes()
@@ -970,9 +1072,68 @@ function SnakeGameService:KnitInit()
 
     -- Developer Product 正确回调：ProcessReceipt
     -- 说明：购买成功后必须由服务器返回 PurchaseGranted 才会结算；这里才是权威点。
+    local function grantRevenge(player)
+        if not player then return end
+        local key = uid(player.UserId)
+        local targetKey = playerPendingRevenge[key]
+        -- 防二次触发
+        if not targetKey then
+            print("[SnakeGameService] grantRevenge: skip, no pending target for", player.Name)
+            -- 目标丢失也要给买家复活，避免面板永远不关
+            SnakeGameService:RequestRespawn(player)
+            return
+        end
+        playerPendingRevenge[key] = nil
+
+        local targetSnake = snakes[targetKey]
+        local targetPid = uidNum(targetKey)
+        local targetName = "Unknown"
+
+        if not targetSnake or not targetSnake.alive then
+            print("[SnakeGameService] grantRevenge: target", targetKey, "already dead or gone")
+        else
+            -- 杀死目标蛇（与头对头碰撞的死亡路径一致）
+            local lostLength = targetSnake.displayLength or #targetSnake.body
+            targetName = targetSnake.playerName or "Unknown"
+            targetSnake.alive = false
+
+            -- 记录目标死前长度（供其购买 Revive）；记录凶手（供其购买 Revenge 反 Revenge）
+            if targetPid and targetPid > 0 then
+                playerPendingRevive[uid(targetPid)] = lostLength
+                playerPendingRevenge[uid(targetPid)] = key
+            end
+
+            SnakeDiedSignal:Fire({
+                victimUserId = targetPid,
+                killedBy = player.Name .. " (Revenge)",
+                killerUid = key,
+                lostSize = lostLength,
+            })
+
+            print("[SnakeGameService] Revenge: " .. player.Name .. " killed " .. targetName)
+        end
+
+        -- 复仇者重生（关闭死亡面板）
+        SnakeGameService:RequestRespawn(player)
+    end
+
+    local function grantRevive(player)
+        if not player then return end
+        local key = uid(player.UserId)
+        local lostSize = playerPendingRevive[key]
+        -- 如果没有待恢复数据（已被之前的调用消耗，或从未设置），跳过，防止二次触发（Studio 里 ProcessReceipt 和 PromptProductPurchaseFinished 都会触发）
+        if not lostSize or lostSize <= 0 then
+            print("[SnakeGameService] grantRevive: skip, no pendingRevive for", player.Name)
+            return
+        end
+        playerPendingRevive[key] = nil  -- 用完即清，防止二次触发
+        SnakeGameService:RequestRevive(player, lostSize)
+        print("[SnakeGameService] Revive granted to", player.Name, "restoring", lostSize, "size")
+    end
+
     MarketplaceService.ProcessReceipt = function(receiptInfo)
         local pid = receiptInfo.ProductId
-        if pid ~= PRODUCT_ID_2X_SPEED and pid ~= PRODUCT_ID_2X_SIZE and pid ~= PRODUCT_ID_KILL_ALL then
+        if pid ~= PRODUCT_ID_2X_SPEED and pid ~= PRODUCT_ID_2X_SIZE and pid ~= PRODUCT_ID_KILL_ALL and pid ~= PRODUCT_ID_REVIVE and pid ~= PRODUCT_ID_REVENGE then
             return Enum.ProductPurchaseDecision.NotProcessedYet
         end
         local player = Players:GetPlayerByUserId(receiptInfo.PlayerId)
@@ -985,13 +1146,17 @@ function SnakeGameService:KnitInit()
             grant2xSize(player)
         elseif pid == PRODUCT_ID_KILL_ALL then
             grantKillAll(player)
+        elseif pid == PRODUCT_ID_REVIVE then
+            grantRevive(player)
+        elseif pid == PRODUCT_ID_REVENGE then
+            grantRevenge(player)
         end
         return Enum.ProductPurchaseDecision.PurchaseGranted
     end
 
     -- 兼容：某些环境里仍会触发 PromptProductPurchaseFinished（参数可能是 Player 或 userId）
     MarketplaceService.PromptProductPurchaseFinished:Connect(function(playerOrUserId, productId, success)
-        if (productId ~= PRODUCT_ID_2X_SPEED and productId ~= PRODUCT_ID_2X_SIZE and productId ~= PRODUCT_ID_KILL_ALL) or not success then return end
+        if (productId ~= PRODUCT_ID_2X_SPEED and productId ~= PRODUCT_ID_2X_SIZE and productId ~= PRODUCT_ID_KILL_ALL and productId ~= PRODUCT_ID_REVIVE and productId ~= PRODUCT_ID_REVENGE) or not success then return end
         local player = nil
         if typeof(playerOrUserId) == "Instance" and playerOrUserId:IsA("Player") then
             player = playerOrUserId
@@ -1004,6 +1169,10 @@ function SnakeGameService:KnitInit()
             grant2xSize(player)
         elseif productId == PRODUCT_ID_KILL_ALL then
             grantKillAll(player)
+        elseif productId == PRODUCT_ID_REVIVE then
+            grantRevive(player)
+        elseif productId == PRODUCT_ID_REVENGE then
+            grantRevenge(player)
         end
     end)
 
@@ -1025,7 +1194,7 @@ function SnakeGameService:KnitInit()
             task.wait(0.5)
             local sn = snakes[uid(p.UserId)]
             if sn then
-                SnakeSpawnedSignal:Fire(p.UserId, sn.body, assignSkinColor(p.UserId))
+                SnakeSpawnedSignal:Fire(p.UserId, sn.body, assignSkinColor(p.UserId), sn.displayLength or INITIAL_LENGTH)
             end
         end)
     end)

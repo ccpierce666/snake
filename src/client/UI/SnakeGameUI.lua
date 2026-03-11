@@ -238,121 +238,231 @@ local function DeathPanel(props)
     local onRevive = props.onRevive
     local onRevenge = props.onRevenge
 
-    -- 无遮罩层，直接居中显示面板
     return el("Frame", {
         Size = UDim2.new(1, 0, 1, 0),
         BackgroundTransparency = 1,
         ZIndex = 100,
     }, {
-        Panel = el("Frame", {
-            Size = UDim2.new(0, 400, 0, 300),
-            Position = UDim2.new(0.5, 0, 0.35, 0),
+        -- 全屏遮罩：阻断所有游戏操作
+        Overlay = el("Frame", {
+            Size = UDim2.new(1, 0, 1, 0),
+            BackgroundColor3 = Color3.new(0, 0, 0),
+            BackgroundTransparency = 0.45,
+            ZIndex = 100,
+            Active = true,  -- 吸收所有鼠标/触摸事件
+        }),
+
+        -- 顶部标题文字
+        TitleLine = el("TextLabel", {
+            Size = UDim2.new(1, 0, 0, 50),
+            Position = UDim2.new(0, 0, 0, 18),
+            BackgroundTransparency = 1,
+            RichText = true,
+            Text = 'You are <font color="#FF4444"><b>DEAD</b></font>',
+            Font = Enum.Font.FredokaOne,
+            TextSize = 36,
+            TextColor3 = Color3.new(1, 1, 1),
+            TextStrokeTransparency = 0.2,
+            TextStrokeColor3 = Color3.new(0, 0, 0),
+            ZIndex = 102,
+        }),
+        SubLine = el("TextLabel", {
+            Size = UDim2.new(0.9, 0, 0, 36),
+            Position = UDim2.new(0.5, 0, 0, 60),
+            AnchorPoint = Vector2.new(0.5, 0),
+            BackgroundTransparency = 1,
+            RichText = true,
+            Text = 'You died to <font color="#DD88FF"><b>' .. killedBy .. '</b></font> and lost <font color="#FFEE44"><b>' .. lostSize .. '</b></font> Size!',
+            Font = Enum.Font.FredokaOne,
+            TextSize = 22,
+            TextColor3 = Color3.new(1, 1, 1),
+            TextStrokeTransparency = 0.2,
+            TextStrokeColor3 = Color3.new(0, 0, 0),
+            TextWrapped = true,
+            ZIndex = 102,
+        }),
+
+        Container = el("Frame", {
+            Size = UDim2.new(0, 320, 0, 140),
+            Position = UDim2.new(0.5, 0, 0.65, 0),
             AnchorPoint = Vector2.new(0.5, 0.5),
-            BackgroundColor3 = Color3.fromRGB(40, 40, 50),
+            BackgroundTransparency = 1,
             ZIndex = 101,
+            ClipsDescendants = false,
         }, {
-            UICorner = el("UICorner", { CornerRadius = UDim.new(0, 16) }),
-            UIStroke = el("UIStroke", { Thickness = 3, Color = Color3.new(0,0,0) }),
-            
-            -- Title
-            Title = Roui.Text({
-                Text = "You are DEAD",
-                Size = UDim2.new(1, 0, 0, 60),
-                Position = UDim2.new(0, 0, 0, 15),
-                TextSize = 36,
-                Font = Enum.Font.FredokaOne,
-                TextColor3 = Color3.fromRGB(255, 60, 60),
-                ZIndex = 2,
+            Layout = el("UIListLayout", {
+                FillDirection = Enum.FillDirection.Vertical,
+                HorizontalAlignment = Enum.HorizontalAlignment.Center,
+                VerticalAlignment = Enum.VerticalAlignment.Top,
+                Padding = UDim.new(0, 10),
+                SortOrder = Enum.SortOrder.LayoutOrder,
             }),
-            
-            -- Death Info
-            DeathInfo = Roui.Text({
-                Text = "You died to " .. killedBy .. " and lost " .. lostSize .. " Size!",
-                Size = UDim2.new(0.9, 0, 0, 50),
-                Position = UDim2.new(0.5, 0, 0, 75),
-                AnchorPoint = Vector2.new(0.5, 0),
-                TextSize = 18,
-                Font = Enum.Font.FredokaOne,
-                TextColor3 = Color3.new(1, 1, 1),
-                TextWrapped = true,
-                ZIndex = 2,
-            }),
-            
-            -- Buttons Container
-            ButtonContainer = el("Frame", {
-                Size = UDim2.new(1, 0, 0, 120),
-                Position = UDim2.new(0, 0, 1, -120),
-                BackgroundTransparency = 1,
-                ZIndex = 2,
+
+            -- ── RESPAWN 大按钮 ──
+            RespawnBtn = el("TextButton", {
+                Size = UDim2.new(1, 0, 0, 62),
+                BackgroundColor3 = Color3.fromRGB(50, 170, 255),
+                Text = "",
+                BorderSizePixel = 0,
+                LayoutOrder = 1,
+                ZIndex = 102,
+                [Roact.Event.Activated] = onRespawn,
             }, {
-                UIListLayout = el("UIListLayout", {
-                    FillDirection = Enum.FillDirection.Vertical,
+                UICorner = el("UICorner", { CornerRadius = UDim.new(0, 18) }),
+                UIStroke = el("UIStroke", { Thickness = 3, Color = Color3.new(0,0,0) }),
+                -- "RESPAWN" 主文字
+                Label = el("TextLabel", {
+                    Size = UDim2.new(1, 0, 0, 36),
+                    Position = UDim2.new(0, 0, 0, 4),
+                    BackgroundTransparency = 1,
+                    Text = "RESPAWN",
+                    Font = Enum.Font.FredokaOne,
+                    TextSize = 30,
+                    TextColor3 = Color3.new(1, 1, 1),
+                    TextStrokeTransparency = 0.4,
+                    TextStrokeColor3 = Color3.new(0, 0, 0),
+                    ZIndex = 103,
+                }),
+                -- "(Start from 0 Size)" 副标题
+                SubLabel = el("TextLabel", {
+                    Size = UDim2.new(1, 0, 0, 20),
+                    Position = UDim2.new(0, 0, 0, 38),
+                    BackgroundTransparency = 1,
+                    Text = "(Start from 0 Size)",
+                    Font = Enum.Font.FredokaOne,
+                    TextSize = 14,
+                    TextColor3 = Color3.fromRGB(200, 235, 255),
+                    ZIndex = 103,
+                }),
+            }),
+
+            -- ── REVIVE + REVENGE 并排行 ──
+            BottomRow = el("Frame", {
+                Size = UDim2.new(1, 0, 0, 58),
+                BackgroundTransparency = 1,
+                LayoutOrder = 2,
+                ClipsDescendants = false,
+            }, {
+                Layout = el("UIListLayout", {
+                    FillDirection = Enum.FillDirection.Horizontal,
                     HorizontalAlignment = Enum.HorizontalAlignment.Center,
                     VerticalAlignment = Enum.VerticalAlignment.Center,
                     Padding = UDim.new(0, 10),
                     SortOrder = Enum.SortOrder.LayoutOrder,
                 }),
-                
-                -- RESPAWN Button (Large, Blue)
-                RespawnBtn = el("TextButton", {
-                    Size = UDim2.new(0, 300, 0, 45),
-                    BackgroundColor3 = Color3.fromRGB(60, 160, 255),
-                    Text = "RESPAWN",
-                    Font = Enum.Font.FredokaOne,
-                    TextSize = 20,
-                    TextColor3 = Color3.new(1, 1, 1),
-                    BorderSizePixel = 0,
-                    LayoutOrder = 1,
-                    [Roact.Event.Activated] = onRespawn,
-                }, {
-                    UICorner = el("UICorner", { CornerRadius = UDim.new(0, 12) }),
-                    UIStroke = el("UIStroke", { Thickness = 2, Color = Color3.new(0,0,0) }),
-                }),
-                
-                -- REVIVE and REVENGE Row
-                BottomRow = el("Frame", {
-                    Size = UDim2.new(0, 300, 0, 40),
+
+                -- REVIVE 按钮（紫粉色，心形图标，左上角 +X Size 徽章）
+                ReviveWrapper = el("Frame", {
+                    Size = UDim2.new(0, 148, 0, 50),
                     BackgroundTransparency = 1,
-                    LayoutOrder = 2,
+                    LayoutOrder = 1,
+                    ClipsDescendants = false,
                 }, {
-                    UIListLayout = el("UIListLayout", {
-                        FillDirection = Enum.FillDirection.Horizontal,
-                        HorizontalAlignment = Enum.HorizontalAlignment.Center,
-                        VerticalAlignment = Enum.VerticalAlignment.Center,
-                        Padding = UDim.new(0, 10),
-                        SortOrder = Enum.SortOrder.LayoutOrder,
-                    }),
-                    
-                    -- REVIVE Button (Pink, with heart)
-                    ReviveBtn = el("TextButton", {
-                        Size = UDim2.new(0, 140, 0, 40),
-                        BackgroundColor3 = Color3.fromRGB(255, 100, 180),
-                        Text = "❤ REVIVE",
-                        Font = Enum.Font.FredokaOne,
-                        TextSize = 16,
-                        TextColor3 = Color3.new(1, 1, 1),
+                    Btn = el("TextButton", {
+                        Size = UDim2.new(1, 0, 1, 0),
+                        BackgroundColor3 = Color3.fromRGB(210, 100, 220),
+                        Text = "",
                         BorderSizePixel = 0,
-                        LayoutOrder = 1,
+                        ZIndex = 102,
                         [Roact.Event.Activated] = onRevive,
                     }, {
-                        UICorner = el("UICorner", { CornerRadius = UDim.new(0, 10) }),
-                        UIStroke = el("UIStroke", { Thickness = 2, Color = Color3.new(0,0,0) }),
+                        UICorner = el("UICorner", { CornerRadius = UDim.new(0, 14) }),
+                        UIStroke = el("UIStroke", { Thickness = 3, Color = Color3.new(0,0,0) }),
+                        -- 心形图标
+                        Icon = el("TextLabel", {
+                            Size = UDim2.new(0, 36, 1, 0),
+                            Position = UDim2.new(0, 6, 0, 0),
+                            BackgroundTransparency = 1,
+                            Text = "❤",
+                            Font = Enum.Font.FredokaOne,
+                            TextSize = 26,
+                            TextColor3 = Color3.fromRGB(255, 80, 100),
+                            ZIndex = 103,
+                        }),
+                        -- REVIVE 文字
+                        Label = el("TextLabel", {
+                            Size = UDim2.new(1, -46, 1, 0),
+                            Position = UDim2.new(0, 42, 0, 0),
+                            BackgroundTransparency = 1,
+                            Text = "REVIVE",
+                            Font = Enum.Font.FredokaOne,
+                            TextSize = 20,
+                            TextColor3 = Color3.new(1, 1, 1),
+                            TextStrokeTransparency = 0.4,
+                            TextStrokeColor3 = Color3.new(0, 0, 0),
+                            ZIndex = 103,
+                        }),
                     }),
-                    
-                    -- REVENGE Button (Red, with sword)
-                    RevengeBtn = el("TextButton", {
-                        Size = UDim2.new(0, 140, 0, 40),
-                        BackgroundColor3 = Color3.fromRGB(255, 40, 40),
-                        Text = "⚔ REVENGE",
+                    -- +X Size 徽章（左上角，绿色）
+                    SizeBadge = el("TextLabel", {
+                        Size = UDim2.new(0, 72, 0, 20),
+                        Position = UDim2.new(0, 4, 0, -11),
+                        BackgroundTransparency = 1,
+                        Text = "+" .. lostSize .. " Size",
                         Font = Enum.Font.FredokaOne,
-                        TextSize = 16,
-                        TextColor3 = Color3.new(1, 1, 1),
+                        TextSize = 14,
+                        TextColor3 = Color3.fromRGB(100, 255, 100),
+                        TextStrokeTransparency = 0.3,
+                        TextStrokeColor3 = Color3.new(0, 0, 0),
+                        ZIndex = 105,
+                    }),
+                }),
+
+                -- REVENGE 按钮（橙红色，剑图标，右上角 KILL XX 徽章）
+                RevengeWrapper = el("Frame", {
+                    Size = UDim2.new(0, 148, 0, 50),
+                    BackgroundTransparency = 1,
+                    LayoutOrder = 2,
+                    ClipsDescendants = false,
+                }, {
+                    Btn = el("TextButton", {
+                        Size = UDim2.new(1, 0, 1, 0),
+                        BackgroundColor3 = Color3.fromRGB(255, 65, 50),
+                        Text = "",
                         BorderSizePixel = 0,
-                        LayoutOrder = 2,
+                        ZIndex = 102,
                         [Roact.Event.Activated] = onRevenge,
                     }, {
-                        UICorner = el("UICorner", { CornerRadius = UDim.new(0, 10) }),
-                        UIStroke = el("UIStroke", { Thickness = 2, Color = Color3.new(0,0,0) }),
+                        UICorner = el("UICorner", { CornerRadius = UDim.new(0, 14) }),
+                        UIStroke = el("UIStroke", { Thickness = 3, Color = Color3.new(0,0,0) }),
+                        -- 剑图标
+                        Icon = el("TextLabel", {
+                            Size = UDim2.new(0, 36, 1, 0),
+                            Position = UDim2.new(0, 6, 0, 0),
+                            BackgroundTransparency = 1,
+                            Text = "🗡",
+                            Font = Enum.Font.FredokaOne,
+                            TextSize = 24,
+                            TextColor3 = Color3.fromRGB(255, 210, 60),
+                            ZIndex = 103,
+                        }),
+                        -- REVENGE 文字
+                        Label = el("TextLabel", {
+                            Size = UDim2.new(1, -46, 1, 0),
+                            Position = UDim2.new(0, 42, 0, 0),
+                            BackgroundTransparency = 1,
+                            Text = "REVENGE",
+                            Font = Enum.Font.FredokaOne,
+                            TextSize = 20,
+                            TextColor3 = Color3.new(1, 1, 1),
+                            TextStrokeTransparency = 0.4,
+                            TextStrokeColor3 = Color3.new(0, 0, 0),
+                            ZIndex = 103,
+                        }),
+                    }),
+                    -- KILL XX 徽章（右上角，黄色）
+                    KillBadge = el("TextLabel", {
+                        Size = UDim2.new(1, 0, 0, 20),
+                        Position = UDim2.new(0, 0, 0, -11),
+                        BackgroundTransparency = 1,
+                        Text = "KILL " .. killedBy,
+                        Font = Enum.Font.FredokaOne,
+                        TextSize = 13,
+                        TextXAlignment = Enum.TextXAlignment.Right,
+                        TextColor3 = Color3.fromRGB(255, 230, 60),
+                        TextStrokeTransparency = 0.3,
+                        TextStrokeColor3 = Color3.new(0, 0, 0),
+                        ZIndex = 105,
                     }),
                 }),
             }),

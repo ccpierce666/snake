@@ -799,8 +799,8 @@ function SnakeGame3DView.Init()
             end
         end
 
-        -- 3. 相机跟随蛇头 (原版方式)
-        if #snakeParts > 0 then
+        -- 3. 相机跟随本地玩家蛇头（死亡后冻结镜头，不跟随他人蛇）
+        if localPlayerSnakeState and #snakeParts > 0 then
             local headPart = snakeParts[1]
             local cam = Workspace.CurrentCamera
             if cam then
@@ -818,7 +818,7 @@ function SnakeGame3DView.Init()
     end)
 end
 
-function SnakeGame3DView.SpawnSnake(userId, body, color)
+function SnakeGame3DView.SpawnSnake(userId, body, color, initDisplayLength)
     userId = tostring(userId)  -- 调用方传入 "uXXXX" 字符串，tostring 保持不变
     local localUserId = uid(Players.LocalPlayer.UserId)
     
@@ -826,8 +826,6 @@ function SnakeGame3DView.SpawnSnake(userId, body, color)
     if typeof(body) == "Vector3" then
         body = {body}
     end
-    
-    
 
     if userId == localUserId then
         local p = Players:GetPlayerByUserId(uidNum(userId))
@@ -840,11 +838,16 @@ function SnakeGame3DView.SpawnSnake(userId, body, color)
             isMoving = false,
             growQueue = 0,
             alive = true,
-            logicalLength = 0,
-            displayLength = 0,
+            logicalLength = initDisplayLength or 0,
+            displayLength = initDisplayLength or 0,
             sizeMultiplier = localSizeMultiplier or 1,
             color = color or Color3.fromRGB(255, 210, 60),
         }
+        -- 复活时恢复镜头为 Custom 模式，让 Heartbeat 重新绑定 CameraSubject
+        local cam = Workspace.CurrentCamera
+        if cam then
+            cam.CameraType = Enum.CameraType.Custom
+        end
     else
         local p = Players:GetPlayerByUserId(uidNum(userId))
         if p then hideCharacter(p) end
@@ -860,8 +863,8 @@ function SnakeGame3DView.SpawnSnake(userId, body, color)
             alive = true,
             userId = userId,
             playerName = playerName,
-            logicalLength = 0,
-            displayLength = 0,
+            logicalLength = initDisplayLength or 0,
+            displayLength = initDisplayLength or 0,
             sizeMultiplier = 1,
             color = color or Color3.fromRGB(200, 200, 200),
         }
@@ -1010,6 +1013,12 @@ function SnakeGame3DView.RemoveSnake(userId)
     userId = tostring(userId)
     if userId == uid(Players.LocalPlayer.UserId) then
         localPlayerSnakeState = nil
+        -- 死亡后冻结镜头：切换为 Scriptable 并锁定当前 CFrame，防止镜头跟随其他蛇移动
+        local cam = Workspace.CurrentCamera
+        if cam then
+            cam.CameraType = Enum.CameraType.Scriptable
+            -- CFrame 保持不变，镜头停在原地
+        end
     else
         otherSnakes[userId] = nil
         

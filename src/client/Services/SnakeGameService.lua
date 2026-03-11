@@ -63,6 +63,10 @@ function SnakeGameService:RequestRespawn()
     -- 客户端版本只是占位符，实际调用会被 Knit 代理转发到服务器
 end
 
+function SnakeGameService:RequestRevive(lostSize)
+    -- 客户端版本只是占位符，实际调用会被 Knit 代理转发到服务器
+end
+
 function SnakeGameService:GetSpeedMultiplier()
 end
 
@@ -78,6 +82,14 @@ function SnakeGameService:RequestPurchase2xSize()
 end
 
 function SnakeGameService:RequestPurchaseKillAll()
+    -- 客户端版本只是占位符，实际调用会被 Knit 代理转发到服务器
+end
+
+function SnakeGameService:RequestPurchaseRevive(lostSize)
+    -- 客户端版本只是占位符，实际调用会被 Knit 代理转发到服务器
+end
+
+function SnakeGameService:RequestPurchaseRevenge(killerUid)
     -- 客户端版本只是占位符，实际调用会被 Knit 代理转发到服务器
 end
 

@@ -142,8 +142,16 @@ function SnakeGameController:KnitStart()
     end
 
     SnakeGameUI.Callbacks.onRespawn = doRespawn
-    SnakeGameUI.Callbacks.onRevive  = doRespawn
-    SnakeGameUI.Callbacks.onRevenge = doRespawn
+    SnakeGameUI.Callbacks.onRevive  = function()
+        -- 把本地记录的 lostSize 传给服务端，作为 playerPendingRevive 的可靠来源
+        local size = ClientState.lostSize or 0
+        pcall(function() SnakeGameService:RequestPurchaseRevive(size) end)
+    end
+    SnakeGameUI.Callbacks.onRevenge = function()
+        -- 把凶手 uid 传给服务端，购买 Revenge 商品后立即杀死目标
+        local targetUid = ClientState.killerUid or ""
+        pcall(function() SnakeGameService:RequestPurchaseRevenge(targetUid) end)
+    end
 
     SnakeGameUI.Callbacks.onPurchase2xSpeed = function()
         local svc = SnakeGameService or (Knit and Knit.GetService and Knit.GetService("SnakeGameService"))
@@ -193,8 +201,13 @@ function SnakeGameController:KnitStart()
 
     -- 蛇生成
     if SnakeGameService.SnakeSpawned then
-        SnakeGameService.SnakeSpawned:Connect(function(userId, spawnPos, color)
-            SnakeGame3DView.SpawnSnake(uid(userId), spawnPos, color)
+        SnakeGameService.SnakeSpawned:Connect(function(userId, spawnPos, color, initDisplayLength)
+            SnakeGame3DView.SpawnSnake(uid(userId), spawnPos, color, initDisplayLength)
+            -- 本地玩家重生（Respawn 或 Revive 购买均触发此分支）→ 关闭死亡面板
+            if userId == Players.LocalPlayer.UserId then
+                ClientState.isDead = false
+                SnakeGameUI.Update(ClientState)
+            end
         end)
     end
 
@@ -339,6 +352,7 @@ function SnakeGameController:KnitStart()
             if victimUserId == Players.LocalPlayer.UserId then
                 ClientState.isDead = true
                 ClientState.killedBy = deathData.killedBy or "Unknown"
+                ClientState.killerUid = deathData.killerUid or ""
                 ClientState.lostSize = deathData.lostSize or 0
                 SnakeGameUI.Update(ClientState)
             end
@@ -421,6 +435,7 @@ function SnakeGameController:KnitStart()
     local keysPressed = { W = false, A = false, S = false, D = false }
 
     local function sendDirection()
+        if ClientState.isDead then return end
         if isAutoMode then
              isAutoMode = false
              ClientState.autoMode = false
@@ -483,6 +498,7 @@ function SnakeGameController:KnitStart()
     local touchMoving = false
 
     UserInputService.TouchStarted:Connect(function(touchInput, processed)
+        if ClientState.isDead then return end
         -- 已经有摇杆手指了，忽略其他手指
         if joystickTouchId ~= nil then return end
         joystickTouchId = touchInput
@@ -491,6 +507,7 @@ function SnakeGameController:KnitStart()
     end)
 
     UserInputService.TouchMoved:Connect(function(touchInput, processed)
+        if ClientState.isDead then return end
         -- 只响应摇杆手指的移动
         if touchInput ~= joystickTouchId or not touchStartPos then return end
 

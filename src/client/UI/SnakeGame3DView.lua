@@ -1128,4 +1128,12 @@ function SnakeGame3DView.SetClientStateRef(clientState)
     clientStateRef = clientState
 end
 
+-- 返回本地玩家蛇头的世界坐标（供吃食物特效使用）
+function SnakeGame3DView.GetLocalHeadPos()
+    if localPlayerSnakeState and localPlayerSnakeState.body and localPlayerSnakeState.body[1] then
+        return localPlayerSnakeState.body[1]
+    end
+    return nil
+end
+
 return SnakeGame3DView

@@ -288,11 +288,18 @@ function SnakeGameController:KnitStart()
         end)
     end
 
-    -- 金币更新
+    -- 金币更新（仅本地玩家收到）→ 直接从蛇头位置播放特效
     if SnakeGameService.MoneyChanged then
         SnakeGameService.MoneyChanged:Connect(function(money)
             ClientState.money = money
-            -- 【临时禁用】SnakeGameUI.Update(ClientState)
+            if ClientState.isDead then return end
+            local headPos = SnakeGame3DView.GetLocalHeadPos and SnakeGame3DView.GetLocalHeadPos()
+            if not headPos then return end
+            local camera = workspace.CurrentCamera
+            local sp, onScr = camera:WorldToViewportPoint(headPos)
+            if onScr then
+                SnakeGameUI.PlayEatEffect(Vector2.new(sp.X, sp.Y))
+            end
         end)
     end
     

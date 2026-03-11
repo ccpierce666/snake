@@ -1,6 +1,9 @@
 -- SnakeGameUI - Roui + Roact implementation
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local Players = game:GetService("Players")
+local TweenService = game:GetService("TweenService")
+local SoundService = game:GetService("SoundService")
+local RunService = game:GetService("RunService")
 
 local Common = ReplicatedStorage:WaitForChild("Common")
 local Roact = require(Common:WaitForChild("Roact"))
@@ -647,6 +650,7 @@ function SnakeGameUIRoot:render()
                 SortOrder = Enum.SortOrder.LayoutOrder,
             }),
             ScoreBar = Roui.StatBar({
+                Name = "SnakeScoreBar",
                 BackgroundColor3 = Color3.fromRGB(60, 160, 255), -- Blue
                 Icon = "rbxassetid://89074978607958", -- Snake Icon
                 Value = formatNumber(score),
@@ -654,6 +658,7 @@ function SnakeGameUIRoot:render()
                 LayoutOrder = 1,
             }),
             MoneyBar = Roui.StatBar({
+                Name = "SnakeMoneyBar",
                 BackgroundColor3 = Color3.fromRGB(80, 220, 80), -- Green
                 Icon = "rbxassetid://105300168575798", -- Cash Stack
                 Value = formatNumber(money),
@@ -753,22 +758,103 @@ function SnakeGameUIRoot:render()
         })
     end
 
-    -- 调试：在底部显示当前在线时长
-    children.DebugTime = Roui.Text({
-        Text = "Time: " .. formatTime(giftData.timePlayed),
-        Size = UDim2.new(0, 100, 0, 20),
-        Position = UDim2.new(0, 10, 1, -30),
-        TextSize = 14,
-        TextColor3 = Color3.new(1,1,1),
-        BackgroundTransparency = 0.5,
-        BackgroundColor3 = Color3.new(0,0,0),
-    })
+    -- （调试时间框已移除，避免遮挡游戏画面）
 
     return el("Frame", {
         Name = "SnakeGameUI",
         Size = UDim2.new(1, 0, 1, 0),
         BackgroundTransparency = 1,
     }, children)
+end
+
+-- ======================================================
+-- 吃食物特效：钞票 + 长度飞向对应 StatBar，伴有音效
+-- ======================================================
+local eatSound = nil
+local function getEatSound()
+    if eatSound then return eatSound end
+    eatSound = Instance.new("Sound")
+    -- biu~ 激光射出音效
+    eatSound.SoundId       = "rbxassetid://12221967"
+    eatSound.Volume        = 0.6
+    eatSound.PlaybackSpeed = 1.8   -- 加快播放速度，biubiubiu 感
+    eatSound.RollOffMaxDistance = 0
+    eatSound.Parent        = SoundService
+    return eatSound
+end
+
+-- startScreenPos : Vector2（食物 WorldToViewportPoint 结果）
+-- foodValue      : number（食物分值，用于显示 +X）
+-- 读取 StatBar 的屏幕中心坐标，等布局完成后再读
+local function getBarCenter(name, fallbackX, fallbackY)
+    local inst = gui and gui:FindFirstChild(name, true)
+    if inst then
+        local ap = inst.AbsolutePosition
+        local as = inst.AbsoluteSize
+        if as.X > 0 and as.Y > 0 then
+            return Vector2.new(ap.X + as.X * 0.5, ap.Y + as.Y * 0.5)
+        end
+    end
+    -- 兜底：基于固定布局像素
+    -- LeftContainer pos=(15,15)，ScoreBar size=(112,32) → center≈(71,31)
+    -- MoneyBar 在 ScoreBar 下方 padding8 → center≈(71,71)
+    return Vector2.new(fallbackX, fallbackY)
+end
+
+function SnakeGameUI.PlayEatEffect(startScreenPos)
+    if not gui then return end
+    local sx, sy = startScreenPos.X, startScreenPos.Y
+
+    -- 等下一帧渲染完毕，AbsolutePosition 才有有效值
+    task.spawn(function()
+        RunService.Heartbeat:Wait()
+
+        -- 钞票图标 → 飞向 MoneyBar（绿色钱条）
+        local moneyCenter = getBarCenter("SnakeMoneyBar", 71, 71)
+        -- 蛇身长图标 → 飞向 ScoreBar（蓝色长度条）
+        local scoreCenter = getBarCenter("SnakeScoreBar", 71, 31)
+
+        -- startOffX/Y：图标的出发点相对蛇头的偏移，让两条轨迹从起点就分叉
+        local function spawnFlyIcon(assetId, targetPos, startOffX, startOffY)
+            startOffX = startOffX or 0
+            startOffY = startOffY or 0
+            local img = Instance.new("ImageLabel")
+            img.Size                   = UDim2.new(0, 32, 0, 32)
+            img.Position               = UDim2.new(0, sx - 16 + startOffX, 0, sy - 16 + startOffY)
+            img.BackgroundTransparency = 1
+            img.Image                  = assetId
+            img.ZIndex                 = 250
+            img.Parent                 = gui
+
+            -- 飞行：Quad In（越来越快冲向目标）
+            local duration = 0.7
+            TweenService:Create(img,
+                TweenInfo.new(duration, Enum.EasingStyle.Quad, Enum.EasingDirection.In),
+                { Position = UDim2.new(0, targetPos.X - 16, 0, targetPos.Y - 16) }
+            ):Play()
+            -- 后半段才开始淡出（前半段完整可见）
+            task.delay(duration * 0.5, function()
+                if not img.Parent then return end
+                TweenService:Create(img,
+                    TweenInfo.new(duration * 0.5, Enum.EasingStyle.Linear),
+                    { ImageTransparency = 1 }
+                ):Play()
+            end)
+
+            task.delay(duration + 0.1, function()
+                if img and img.Parent then img:Destroy() end
+            end)
+        end
+
+        -- 🐍 蛇图标：从蛇头偏上出发 → 飞向长度条（ScoreBar，上方）
+        spawnFlyIcon("rbxassetid://89074978607958",  scoreCenter, -20, -28)
+        -- 💵 钞票图标：从蛇头偏下出发 → 飞向金钱条（MoneyBar，下方）
+        spawnFlyIcon("rbxassetid://105300168575798", moneyCenter,  20,  28)
+
+        -- 音效
+        local s = getEatSound()
+        if s then s:Play() end
+    end)
 end
 
 function SnakeGameUI.Start()

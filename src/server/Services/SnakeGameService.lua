@@ -361,11 +361,9 @@ end
 function SnakeGameService:ChangeDirection(player, direction)
     local s = snakes[uid(player.UserId)]
     if not s then return end
-    if not s.alive then
-        self:RequestRespawn(player)
-        s = snakes[uid(player.UserId)]
-    end
-    
+    -- 死亡时忽略方向输入，不自动复活（玩家需在死亡面板点击 Respawn）
+    if not s.alive then return end
+
     local head = s.body and s.body[1]
     if direction.Magnitude > 0.1 then
         s.targetDirection = direction.Unit
@@ -542,13 +540,6 @@ function SnakeGameService:GetSpins(player)
     return playerSpins[uid(player.UserId)] or 0
 end
 
-function SnakeGameService:ClaimGift(player, index)
-    return self.Server:ClaimGift(player, index)
-end
-
-function SnakeGameService:Spin(player)
-    return self.Server:Spin(player)
-end
 
 function SnakeGameService:GetSpeedMultiplier(player)
     return playerSpeedMultiplier[uid(player.UserId)] or 1
@@ -1193,7 +1184,8 @@ function SnakeGameService:KnitInit()
         p.CharacterAdded:Connect(function()
             task.wait(0.5)
             local sn = snakes[uid(p.UserId)]
-            if sn then
+            -- 只有蛇存活时才通知客户端，避免死亡后角色自动重生把死亡面板关掉
+            if sn and sn.alive then
                 SnakeSpawnedSignal:Fire(p.UserId, sn.body, assignSkinColor(p.UserId), sn.displayLength or INITIAL_LENGTH)
             end
         end)

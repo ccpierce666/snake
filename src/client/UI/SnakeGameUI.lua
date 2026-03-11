@@ -4,6 +4,8 @@ local Players = game:GetService("Players")
 local TweenService = game:GetService("TweenService")
 local SoundService = game:GetService("SoundService")
 local RunService = game:GetService("RunService")
+local ContentProvider = game:GetService("ContentProvider")
+local GuiService = game:GetService("GuiService")
 
 local Common = ReplicatedStorage:WaitForChild("Common")
 local Roact = require(Common:WaitForChild("Roact"))
@@ -171,8 +173,7 @@ local function buildLeaderboard(state)
     end
 
     return Roui.Leaderboard({
-        Position = UDim2.new(1, -160, 0, -34),
-        Size = UDim2.new(0, 152, 0, 100),
+        Size = UDim2.new(1, 0, 0, 108),
     }, children)
 end
 
@@ -181,56 +182,82 @@ local function NextGiftWidget(props)
     local timePlayed = tonumber(giftData.timePlayed) or 0
     local claimed = giftData.claimed or {}
     local onActivated = props.onActivated
-    
+
     local nextReward = nil
-    local nextIndex = 0
     for i, reward in ipairs(GIFT_REWARDS) do
         if not claimed[tostring(i)] then
             nextReward = reward
-            nextIndex = i
             break
         end
     end
-    
-    if not nextReward then 
+
+    if not nextReward then
         return el("Frame", { Size = UDim2.new(0, 0, 0, 0), BackgroundTransparency = 1 })
     end
-    
+
     local timeLeft = math.max(0, nextReward.time - timePlayed)
     local canClaim = timeLeft <= 0
-    
-    -- 动态选择颜色：可领取时为绿色，否则为蓝色
-    local buttonColor = canClaim and Color3.fromRGB(120, 220, 100) or Color3.fromRGB(60, 150, 255)
-    
-    return Roui.Button({
-        Size = UDim2.new(0, 145, 0, 36),
-        Color = buttonColor,
-        Text = "",
-        [Roact.Event.Activated] = onActivated,
+
+    -- 可领取时用绿色，否则用蓝色（与截图一致）
+    local pillColor  = canClaim and Color3.fromRGB(90, 200, 80) or Color3.fromRGB(50, 140, 255)
+    local labelText  = canClaim and "Claim Gift!" or ("Gift in " .. formatTime(timeLeft))
+
+    -- 整体容器：填满父容器宽度，高 36px
+    local WIDGET_H = 36
+    local ICON_SIZE = 42
+
+    return el("Frame", {
+        Size = UDim2.new(1, 0, 0, WIDGET_H),
+        BackgroundTransparency = 1,
+        ClipsDescendants = false,
     }, {
-        -- 礼包图标
-        GiftIcon = el("TextLabel", {
-            Size = UDim2.new(0, 26, 0, 26),
-            Position = UDim2.new(0, 5, 0.5, 0),
+        -- ── 胶囊背景 ──────────────────────────────────────────────
+        Pill = el("TextButton", {
+            Size = UDim2.new(1, -16, 1, 0),
+            Position = UDim2.new(0, 16, 0, 0),
+            BackgroundColor3 = pillColor,
+            AutoButtonColor = true,
+            Text = "",
+            ZIndex = 2,
+            [Roact.Event.Activated] = onActivated,
+        }, {
+            UICorner = el("UICorner", { CornerRadius = UDim.new(0.5, 0) }),
+            UIStroke = el("UIStroke", {
+                Color = Color3.fromRGB(0, 0, 0),
+                Thickness = 2,
+                ApplyStrokeMode = Enum.ApplyStrokeMode.Border,
+            }),
+            -- 倒计时 / Claim 文字
+            Label = el("TextLabel", {
+                Size = UDim2.new(1, -36, 1, 0),
+                Position = UDim2.new(0, 32, 0, 0),
+                BackgroundTransparency = 1,
+                Text = labelText,
+                Font = Enum.Font.FredokaOne,
+                TextSize = 14,
+                TextColor3 = Color3.fromRGB(255, 255, 255),
+                TextXAlignment = Enum.TextXAlignment.Left,
+                TextYAlignment = Enum.TextYAlignment.Center,
+                ZIndex = 3,
+            }, {
+                UIStroke = el("UIStroke", {
+                    Color = Color3.fromRGB(0, 0, 80),
+                    Thickness = 1.5,
+                    ApplyStrokeMode = Enum.ApplyStrokeMode.Contextual,
+                }),
+            }),
+        }),
+
+        -- ── 礼物图标 ─────────────────────────────────────────────
+        GiftImg = el("ImageLabel", {
+            Size = UDim2.new(0, ICON_SIZE, 0, ICON_SIZE),
+            Position = UDim2.new(0, 0, 0.5, 0),
             AnchorPoint = Vector2.new(0, 0.5),
             BackgroundTransparency = 1,
-            Text = "🎁",
-            TextSize = 22,
-            Font = Enum.Font.GothamBold,
-            TextColor3 = Color3.fromRGB(255, 255, 255),
-            ZIndex = 2,
+            Image = "rbxthumb://type=Asset&id=139988932455302&w=420&h=420",
+            ScaleType = Enum.ScaleType.Fit,
+            ZIndex = 4,
         }),
-        
-        -- 文字标签
-        Label = Roui.Text({
-            Text = canClaim and "GIFT!" or formatTime(timeLeft),
-            Size = UDim2.new(1, -38, 1, 0),
-            Position = UDim2.new(0, 34, 0, 0),
-            TextSize = 11,
-            Font = Enum.Font.FredokaOne,
-            TextXAlignment = Enum.TextXAlignment.Left,
-            ZIndex = 2,
-        })
     })
 end
 
@@ -244,15 +271,15 @@ local function DeathPanel(props)
     return el("Frame", {
         Size = UDim2.new(1, 0, 1, 0),
         BackgroundTransparency = 1,
-        ZIndex = 100,
+        ZIndex = 900,
     }, {
-        -- 全屏遮罩：阻断所有游戏操作
+        -- 全屏遮罩：盖住所有游戏 UI
         Overlay = el("Frame", {
             Size = UDim2.new(1, 0, 1, 0),
             BackgroundColor3 = Color3.new(0, 0, 0),
             BackgroundTransparency = 0.45,
-            ZIndex = 100,
-            Active = true,  -- 吸收所有鼠标/触摸事件
+            ZIndex = 900,
+            Active = true,
         }),
 
         -- 顶部标题文字
@@ -267,7 +294,7 @@ local function DeathPanel(props)
             TextColor3 = Color3.new(1, 1, 1),
             TextStrokeTransparency = 0.2,
             TextStrokeColor3 = Color3.new(0, 0, 0),
-            ZIndex = 102,
+            ZIndex = 902,
         }),
         SubLine = el("TextLabel", {
             Size = UDim2.new(0.9, 0, 0, 36),
@@ -282,7 +309,7 @@ local function DeathPanel(props)
             TextStrokeTransparency = 0.2,
             TextStrokeColor3 = Color3.new(0, 0, 0),
             TextWrapped = true,
-            ZIndex = 102,
+            ZIndex = 902,
         }),
 
         Container = el("Frame", {
@@ -290,7 +317,7 @@ local function DeathPanel(props)
             Position = UDim2.new(0.5, 0, 0.65, 0),
             AnchorPoint = Vector2.new(0.5, 0.5),
             BackgroundTransparency = 1,
-            ZIndex = 101,
+            ZIndex = 901,
             ClipsDescendants = false,
         }, {
             Layout = el("UIListLayout", {
@@ -308,12 +335,11 @@ local function DeathPanel(props)
                 Text = "",
                 BorderSizePixel = 0,
                 LayoutOrder = 1,
-                ZIndex = 102,
+                ZIndex = 902,
                 [Roact.Event.Activated] = onRespawn,
             }, {
                 UICorner = el("UICorner", { CornerRadius = UDim.new(0, 18) }),
                 UIStroke = el("UIStroke", { Thickness = 3, Color = Color3.new(0,0,0) }),
-                -- "RESPAWN" 主文字
                 Label = el("TextLabel", {
                     Size = UDim2.new(1, 0, 0, 36),
                     Position = UDim2.new(0, 0, 0, 4),
@@ -324,9 +350,8 @@ local function DeathPanel(props)
                     TextColor3 = Color3.new(1, 1, 1),
                     TextStrokeTransparency = 0.4,
                     TextStrokeColor3 = Color3.new(0, 0, 0),
-                    ZIndex = 103,
+                    ZIndex = 903,
                 }),
-                -- "(Start from 0 Size)" 副标题
                 SubLabel = el("TextLabel", {
                     Size = UDim2.new(1, 0, 0, 20),
                     Position = UDim2.new(0, 0, 0, 38),
@@ -335,7 +360,7 @@ local function DeathPanel(props)
                     Font = Enum.Font.FredokaOne,
                     TextSize = 14,
                     TextColor3 = Color3.fromRGB(200, 235, 255),
-                    ZIndex = 103,
+                    ZIndex = 903,
                 }),
             }),
 
@@ -354,7 +379,6 @@ local function DeathPanel(props)
                     SortOrder = Enum.SortOrder.LayoutOrder,
                 }),
 
-                -- REVIVE 按钮（紫粉色，心形图标，左上角 +X Size 徽章）
                 ReviveWrapper = el("Frame", {
                     Size = UDim2.new(0, 148, 0, 50),
                     BackgroundTransparency = 1,
@@ -366,12 +390,11 @@ local function DeathPanel(props)
                         BackgroundColor3 = Color3.fromRGB(210, 100, 220),
                         Text = "",
                         BorderSizePixel = 0,
-                        ZIndex = 102,
+                        ZIndex = 902,
                         [Roact.Event.Activated] = onRevive,
                     }, {
                         UICorner = el("UICorner", { CornerRadius = UDim.new(0, 14) }),
                         UIStroke = el("UIStroke", { Thickness = 3, Color = Color3.new(0,0,0) }),
-                        -- 心形图标
                         Icon = el("TextLabel", {
                             Size = UDim2.new(0, 36, 1, 0),
                             Position = UDim2.new(0, 6, 0, 0),
@@ -380,9 +403,8 @@ local function DeathPanel(props)
                             Font = Enum.Font.FredokaOne,
                             TextSize = 26,
                             TextColor3 = Color3.fromRGB(255, 80, 100),
-                            ZIndex = 103,
+                            ZIndex = 903,
                         }),
-                        -- REVIVE 文字
                         Label = el("TextLabel", {
                             Size = UDim2.new(1, -46, 1, 0),
                             Position = UDim2.new(0, 42, 0, 0),
@@ -393,10 +415,9 @@ local function DeathPanel(props)
                             TextColor3 = Color3.new(1, 1, 1),
                             TextStrokeTransparency = 0.4,
                             TextStrokeColor3 = Color3.new(0, 0, 0),
-                            ZIndex = 103,
+                            ZIndex = 903,
                         }),
                     }),
-                    -- +X Size 徽章（左上角，绿色）
                     SizeBadge = el("TextLabel", {
                         Size = UDim2.new(0, 72, 0, 20),
                         Position = UDim2.new(0, 4, 0, -11),
@@ -407,11 +428,10 @@ local function DeathPanel(props)
                         TextColor3 = Color3.fromRGB(100, 255, 100),
                         TextStrokeTransparency = 0.3,
                         TextStrokeColor3 = Color3.new(0, 0, 0),
-                        ZIndex = 105,
+                        ZIndex = 905,
                     }),
                 }),
 
-                -- REVENGE 按钮（橙红色，剑图标，右上角 KILL XX 徽章）
                 RevengeWrapper = el("Frame", {
                     Size = UDim2.new(0, 148, 0, 50),
                     BackgroundTransparency = 1,
@@ -423,12 +443,11 @@ local function DeathPanel(props)
                         BackgroundColor3 = Color3.fromRGB(255, 65, 50),
                         Text = "",
                         BorderSizePixel = 0,
-                        ZIndex = 102,
+                        ZIndex = 902,
                         [Roact.Event.Activated] = onRevenge,
                     }, {
                         UICorner = el("UICorner", { CornerRadius = UDim.new(0, 14) }),
                         UIStroke = el("UIStroke", { Thickness = 3, Color = Color3.new(0,0,0) }),
-                        -- 剑图标
                         Icon = el("TextLabel", {
                             Size = UDim2.new(0, 36, 1, 0),
                             Position = UDim2.new(0, 6, 0, 0),
@@ -437,9 +456,8 @@ local function DeathPanel(props)
                             Font = Enum.Font.FredokaOne,
                             TextSize = 24,
                             TextColor3 = Color3.fromRGB(255, 210, 60),
-                            ZIndex = 103,
+                            ZIndex = 903,
                         }),
-                        -- REVENGE 文字
                         Label = el("TextLabel", {
                             Size = UDim2.new(1, -46, 1, 0),
                             Position = UDim2.new(0, 42, 0, 0),
@@ -450,10 +468,9 @@ local function DeathPanel(props)
                             TextColor3 = Color3.new(1, 1, 1),
                             TextStrokeTransparency = 0.4,
                             TextStrokeColor3 = Color3.new(0, 0, 0),
-                            ZIndex = 103,
+                            ZIndex = 903,
                         }),
                     }),
-                    -- KILL XX 徽章（右上角，黄色）
                     KillBadge = el("TextLabel", {
                         Size = UDim2.new(1, 0, 0, 20),
                         Position = UDim2.new(0, 0, 0, -11),
@@ -465,7 +482,7 @@ local function DeathPanel(props)
                         TextColor3 = Color3.fromRGB(255, 230, 60),
                         TextStrokeTransparency = 0.3,
                         TextStrokeColor3 = Color3.new(0, 0, 0),
-                        ZIndex = 105,
+                        ZIndex = 905,
                     }),
                 }),
             }),
@@ -623,6 +640,10 @@ function SnakeGameUIRoot:render()
     local sizeMultiplier = state.sizeMultiplier or 1
     local has2xSize = sizeMultiplier >= 2
 
+    -- 获取 Roblox 顶栏高度（IgnoreGuiInset=true 时需手动偏移）
+    local insetTop = GuiService:GetGuiInset()
+    local insetY = insetTop.Y
+
     local children = {}
     
     -- 不使用任何缩放，直接用固定像素
@@ -676,14 +697,40 @@ function SnakeGameUIRoot:render()
         }, {}),
     })
 
-    children.Leaderboard = buildLeaderboard(state)
-
-    -- Gift widget hidden
-    children.NextGiftWidgetCont = el("Frame", {
-        Size = UDim2.new(0, 0, 0, 0),
+    -- 右侧栏：排行榜 + Gift 按钮，垂直堆叠
+    children.RightColumn = el("Frame", {
+        Position = UDim2.new(1, -8, 0, -34),
+        AnchorPoint = Vector2.new(1, 0),
+        Size = UDim2.new(0, 160, 0, 160),
         BackgroundTransparency = 1,
-        Visible = false,
-    }, {})
+        ClipsDescendants = false,
+        ZIndex = 10,
+    }, {
+        UIListLayout = el("UIListLayout", {
+            FillDirection = Enum.FillDirection.Vertical,
+            HorizontalAlignment = Enum.HorizontalAlignment.Center,
+            SortOrder = Enum.SortOrder.LayoutOrder,
+            Padding = UDim.new(0, 6),
+        }),
+        Leaderboard = el("Frame", {
+            Size = UDim2.new(1, 0, 0, 108),
+            BackgroundTransparency = 1,
+            LayoutOrder = 1,
+        }, {
+            Inner = buildLeaderboard(state),
+        }),
+        GiftCont = el("Frame", {
+            Size = UDim2.new(1, 0, 0, 36),
+            BackgroundTransparency = 1,
+            ClipsDescendants = false,
+            LayoutOrder = 2,
+        }, {
+            Widget = Roact.createElement(NextGiftWidget, {
+                giftData = giftData,
+                onActivated = SnakeGameUI.Callbacks.onToggleGiftPanel,
+            }),
+        }),
+    })
 
     children.BottomBar = el("Frame", {
         Position = UDim2.new(0.5, 0, 1, -40),
@@ -760,11 +807,29 @@ function SnakeGameUIRoot:render()
 
     -- （调试时间框已移除，避免遮挡游戏画面）
 
+    -- 把普通游戏 UI 拆进 SafeArea（偏移顶部 inset，避免被系统栏遮挡）
+    -- DeathPanel / GiftPanel 留在根层，从 (0,0) 全屏覆盖
+    local deathPanel  = children.DeathPanel
+    local giftPanel   = children.GiftPanel
+    children.DeathPanel = nil
+    children.GiftPanel  = nil
+
+    local rootChildren = {
+        SafeArea = el("Frame", {
+            Position = UDim2.new(0, 0, 0, insetY),
+            Size = UDim2.new(1, 0, 1, -insetY),
+            BackgroundTransparency = 1,
+            ClipsDescendants = false,
+        }, children),
+    }
+    if deathPanel then rootChildren.DeathPanel = deathPanel end
+    if giftPanel  then rootChildren.GiftPanel  = giftPanel  end
+
     return el("Frame", {
         Name = "SnakeGameUI",
         Size = UDim2.new(1, 0, 1, 0),
         BackgroundTransparency = 1,
-    }, children)
+    }, rootChildren)
 end
 
 -- ======================================================
@@ -858,12 +923,20 @@ function SnakeGameUI.PlayEatEffect(startScreenPos)
 end
 
 function SnakeGameUI.Start()
+    -- 预加载礼物图标，确保显示时不出现空白
+    task.spawn(function()
+        pcall(function()
+            ContentProvider:PreloadAsync({ "rbxassetid://139988932455302" })
+        end)
+    end)
+
     local PlayerGui = Players.LocalPlayer:WaitForChild("PlayerGui")
     if PlayerGui:FindFirstChild("SnakeGameUI") then PlayerGui.SnakeGameUI:Destroy() end
     gui = Instance.new("ScreenGui")
     gui.Name = "SnakeGameUI"
     gui.ResetOnSpawn = false
     gui.ZIndexBehavior = Enum.ZIndexBehavior.Sibling
+    gui.IgnoreGuiInset = true
     gui.Parent = PlayerGui
     local success, result = pcall(function()
         return Roact.mount(Roact.createElement(SnakeGameUIRoot, { state = {} }), gui)

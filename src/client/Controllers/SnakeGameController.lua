@@ -122,11 +122,14 @@ function SnakeGameController:KnitStart()
             if success then
                 if result then
                     print("[Gift] 领取成功: " .. index)
-                    -- 等待一下，让服务器发送 GiftUpdate 信号
-                    task.wait(0.3)
-                    -- 【临时禁用】SnakeGameUI.Update(ClientState)
+                    -- 立即本地标记为已领取，无需等服务器推 GiftUpdate
+                    if ClientState.giftData then
+                        ClientState.giftData.claimed = ClientState.giftData.claimed or {}
+                        ClientState.giftData.claimed[tostring(index)] = true
+                    end
+                    SnakeGameUI.Update(ClientState)
                 else
-                    warn("[Gift] 服务器返回领取失败: " .. tostring(msg or "原因未知"))
+                    warn("[Gift] 服务器返回领取失败，index=" .. tostring(index))
                 end
             else
                 warn("[Gift] 远程调用异常: " .. tostring(result))
@@ -204,7 +207,8 @@ function SnakeGameController:KnitStart()
         SnakeGameService.SnakeSpawned:Connect(function(userId, spawnPos, color, initDisplayLength)
             SnakeGame3DView.SpawnSnake(uid(userId), spawnPos, color, initDisplayLength)
             -- 本地玩家重生（Respawn 或 Revive 购买均触发此分支）→ 关闭死亡面板
-            if userId == Players.LocalPlayer.UserId then
+            -- 只有 spawnPos 有效（非 nil/空）时才关闭，防止 CharacterAdded 误触发
+            if userId == Players.LocalPlayer.UserId and spawnPos then
                 ClientState.isDead = false
                 SnakeGameUI.Update(ClientState)
             end
@@ -324,7 +328,7 @@ function SnakeGameController:KnitStart()
     if SnakeGameService.GiftUpdate then
         SnakeGameService.GiftUpdate:Connect(function(data)
             ClientState.giftData = data
-            -- 【临时禁用】SnakeGameUI.Update(ClientState)
+            SnakeGameUI.Update(ClientState)
         end)
     end
     

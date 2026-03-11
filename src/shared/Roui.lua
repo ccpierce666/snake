@@ -124,7 +124,7 @@ function Roui.StatBar(props)
             Size = UDim2.new(1, -52, 1, 0),
             Text = props.Value or "0",
             TextSize = 14,
-            TextXAlignment = Enum.TextXAlignment.Left,
+            TextXAlignment = Enum.TextXAlignment.Center,
             Font = Enum.Font.FredokaOne,
         }),
         

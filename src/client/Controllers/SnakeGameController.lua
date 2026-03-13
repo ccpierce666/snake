@@ -477,12 +477,13 @@ function SnakeGameController:KnitStart()
             end
         end
 
+        local headPos = SnakeGame3DView.GetHeadPosition()
         if dir.Magnitude > 0.01 then
             SnakeGame3DView.UpdateSnakeDirection(uid(Players.LocalPlayer.UserId), dir, true)
-            pcall(function() SnakeGameService:ChangeDirection(dir) end)
+            pcall(function() SnakeGameService:ChangeDirection(dir, headPos) end)
         else
             SnakeGame3DView.UpdateSnakeDirection(uid(Players.LocalPlayer.UserId), Vector3.new(0, 0, 0), false)
-            pcall(function() SnakeGameService:ChangeDirection(Vector3.new(0, 0, 0)) end)
+            pcall(function() SnakeGameService:ChangeDirection(Vector3.new(0, 0, 0), headPos) end)
         end
     end
 
@@ -503,72 +504,132 @@ function SnakeGameController:KnitStart()
         end
     end)
 
-    -- 手机触摸摇杆输入 - 用触摸ID追踪摇杆手指，防止多指干扰
-    local joystickTouchId = nil  -- 当前摇杆绑定的触摸ID
-    local touchStartPos = nil
-    local touchMoving = false
+    -- 手机触摸输入
+    -- 左半屏：摇杆（控制蛇方向）
+    -- 右半屏单指：拖动旋转镜头角度
+    -- 右半屏双指：捏合缩放镜头距离
+    local joystickTouchId  = nil
+    local touchStartPos    = nil
+
+    local cameraTouchId    = nil
+    local cameraTouchLastPos = nil
+    local cameraTouch2Id   = nil
+    local cameraTouch2LastPos = nil
+    local pinchStartDist   = nil
+
+    local function screenLeft(pos)
+        local vp = Workspace.CurrentCamera and Workspace.CurrentCamera.ViewportSize
+        return vp and (pos.X < vp.X / 2) or false
+    end
 
     UserInputService.TouchStarted:Connect(function(touchInput, processed)
         if ClientState.isDead then return end
-        -- 已经有摇杆手指了，忽略其他手指
-        if joystickTouchId ~= nil then return end
-        joystickTouchId = touchInput
-        touchStartPos = touchInput.Position
-        touchMoving = true
+        local isLeft = screenLeft(touchInput.Position)
+        if isLeft then
+            -- 左侧：摇杆，先到先得
+            if joystickTouchId == nil then
+                joystickTouchId = touchInput
+                touchStartPos = touchInput.Position
+            end
+        else
+            -- 右侧：第一个手指 = 旋转，第二个手指 = 配对捏合
+            if cameraTouchId == nil then
+                cameraTouchId = touchInput
+                cameraTouchLastPos = touchInput.Position
+            elseif cameraTouch2Id == nil then
+                cameraTouch2Id = touchInput
+                cameraTouch2LastPos = touchInput.Position
+                -- 记录捏合起始距离
+                local d = (cameraTouchLastPos - cameraTouch2LastPos).Magnitude
+                pinchStartDist = d
+            end
+        end
     end)
 
     UserInputService.TouchMoved:Connect(function(touchInput, processed)
         if ClientState.isDead then return end
-        -- 只响应摇杆手指的移动
-        if touchInput ~= joystickTouchId or not touchStartPos then return end
 
-        local delta = touchInput.Position - touchStartPos
-        local distance = delta.Magnitude
-
-        if distance < 10 then return end
-
-        local maxDist = 100
-        local normalizedX = math.clamp(delta.X / maxDist, -1, 1)
-        local normalizedY = math.clamp(-delta.Y / maxDist, -1, 1)
-
-        local vecMagnitude = math.sqrt(normalizedX * normalizedX + normalizedY * normalizedY)
-        if vecMagnitude > 0.1 then
-            if isAutoMode then
-                isAutoMode = false
-                ClientState.autoMode = false
-                SnakeGameUI.Update(ClientState)
-            end
-
-            local cam = Workspace.CurrentCamera
-            if cam then
-                local look = cam.CFrame.LookVector
-                local right = cam.CFrame.RightVector
-                local flatForward = Vector3.new(look.X, 0, look.Z).Unit
-                local flatRight   = Vector3.new(right.X, 0, right.Z).Unit
-                local combined = flatForward * normalizedY + flatRight * normalizedX
-                if combined.Magnitude > 0.01 then
-                    local dir = combined.Unit
-                    SnakeGame3DView.UpdateSnakeDirection(uid(Players.LocalPlayer.UserId), dir, true)
-                    pcall(function() SnakeGameService:ChangeDirection(dir) end)
+        -- 左侧摇杆：控制蛇方向
+        if touchInput == joystickTouchId and touchStartPos then
+            local delta = touchInput.Position - touchStartPos
+            if delta.Magnitude < 10 then return end
+            local maxDist = 100
+            local normalizedX = math.clamp(delta.X / maxDist, -1, 1)
+            local normalizedY = math.clamp(-delta.Y / maxDist, -1, 1)
+            if math.sqrt(normalizedX^2 + normalizedY^2) > 0.1 then
+                if isAutoMode then
+                    isAutoMode = false
+                    ClientState.autoMode = false
+                    SnakeGameUI.Update(ClientState)
                 end
-            else
-                local dir = Vector3.new(normalizedX, 0, -normalizedY)
-                if dir.Magnitude > 0.01 then
-                    dir = dir.Unit
-                    SnakeGame3DView.UpdateSnakeDirection(uid(Players.LocalPlayer.UserId), dir, true)
-                    pcall(function() SnakeGameService:ChangeDirection(dir) end)
+                local cam = Workspace.CurrentCamera
+                if cam then
+                    local flatForward = Vector3.new(cam.CFrame.LookVector.X, 0, cam.CFrame.LookVector.Z).Unit
+                    local flatRight   = Vector3.new(cam.CFrame.RightVector.X, 0, cam.CFrame.RightVector.Z).Unit
+                    local combined = flatForward * normalizedY + flatRight * normalizedX
+                    if combined.Magnitude > 0.01 then
+                        local dir = combined.Unit
+                        SnakeGame3DView.UpdateSnakeDirection(uid(Players.LocalPlayer.UserId), dir, true)
+                        local hp = SnakeGame3DView.GetHeadPosition()
+                        pcall(function() SnakeGameService:ChangeDirection(dir, hp) end)
+                    end
+                end
+            end
+            return
+        end
+
+        -- 右侧双指：捏合缩放（先处理，避免同时触发旋转）
+        if touchInput == cameraTouch2Id and cameraTouchLastPos then
+            cameraTouch2LastPos = touchInput.Position
+            local currentDist = (cameraTouchLastPos - cameraTouch2LastPos).Magnitude
+            if pinchStartDist and pinchStartDist > 1 then
+                SnakeGame3DView.ZoomCameraOffset(currentDist / pinchStartDist)
+                pinchStartDist = currentDist
+            end
+            return
+        end
+
+        -- 右侧单指：拖动旋转镜头（无第二手指）
+        if touchInput == cameraTouchId and not cameraTouch2Id and cameraTouchLastPos then
+            local prev = cameraTouchLastPos
+            cameraTouchLastPos = touchInput.Position
+            local delta = touchInput.Position - prev
+            SnakeGame3DView.RotateCameraOffset(delta.X, delta.Y)
+            return
+        end
+
+        -- 右侧第一手指在双指模式下移动时，同步更新其位置（用于距离计算）
+        if touchInput == cameraTouchId and cameraTouch2Id and cameraTouchLastPos then
+            local prevPos = cameraTouchLastPos
+            cameraTouchLastPos = touchInput.Position
+            if cameraTouch2LastPos then
+                local currentDist = (cameraTouchLastPos - cameraTouch2LastPos).Magnitude
+                if pinchStartDist and pinchStartDist > 1 then
+                    SnakeGame3DView.ZoomCameraOffset(currentDist / pinchStartDist)
+                    pinchStartDist = currentDist
                 end
             end
         end
     end)
 
     UserInputService.TouchEnded:Connect(function(touchInput, processed)
-        if touchInput ~= joystickTouchId then return end
-        joystickTouchId = nil
-        touchStartPos = nil
-        touchMoving = false
-        SnakeGame3DView.UpdateSnakeDirection(uid(Players.LocalPlayer.UserId), Vector3.new(0, 0, 0), false)
-        pcall(function() SnakeGameService:ChangeDirection(Vector3.new(0, 0, 0)) end)
+        if touchInput == joystickTouchId then
+            joystickTouchId = nil
+            touchStartPos = nil
+            SnakeGame3DView.UpdateSnakeDirection(uid(Players.LocalPlayer.UserId), Vector3.new(0, 0, 0), false)
+            local hp = SnakeGame3DView.GetHeadPosition()
+            pcall(function() SnakeGameService:ChangeDirection(Vector3.new(0, 0, 0), hp) end)
+        elseif touchInput == cameraTouchId then
+            cameraTouchId = cameraTouch2Id   -- 第二指升级为第一指
+            cameraTouchLastPos = cameraTouch2LastPos
+            cameraTouch2Id = nil
+            cameraTouch2LastPos = nil
+            pinchStartDist = nil
+        elseif touchInput == cameraTouch2Id then
+            cameraTouch2Id = nil
+            cameraTouch2LastPos = nil
+            pinchStartDist = nil
+        end
     end)
 
     -- 8a. 礼物计时器（独立 1 秒定时器，不再占用每帧 Heartbeat）
@@ -611,7 +672,19 @@ function SnakeGameController:KnitStart()
         if nearest then
             local dir = (nearest - headPos).Unit
             SnakeGame3DView.UpdateSnakeDirection(uid(Players.LocalPlayer.UserId), dir, true)
-            pcall(function() SnakeGameService:ChangeDirection(dir) end)
+            pcall(function() SnakeGameService:ChangeDirection(dir, headPos) end)
+        end
+    end)
+
+    -- 定期上报自身头部坐标，每 10 帧（约 6fps）纠正服务端累积偏差
+    local syncPosCounter = 0
+    RunService.Heartbeat:Connect(function()
+        syncPosCounter = syncPosCounter + 1
+        if syncPosCounter < 10 then return end
+        syncPosCounter = 0
+        local hp = SnakeGame3DView.GetHeadPosition()
+        if hp then
+            pcall(function() SnakeGameService:SyncPosition(hp) end)
         end
     end)
 

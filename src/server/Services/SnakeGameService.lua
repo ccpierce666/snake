@@ -358,11 +358,19 @@ function SnakeGameService:ClaimGift(player, index)
     return true
 end
 
-function SnakeGameService:ChangeDirection(player, direction)
+function SnakeGameService:ChangeDirection(player, direction, clientHeadPos)
     local s = snakes[uid(player.UserId)]
     if not s then return end
     -- 死亡时忽略方向输入，不自动复活（玩家需在死亡面板点击 Respawn）
     if not s.alive then return end
+
+    -- 用客户端上报的头部坐标纠正服务端位置（消除网络延迟导致的位置偏差）
+    if clientHeadPos and s.body and #s.body > 0 then
+        local drift = (clientHeadPos - s.body[1]).Magnitude
+        if drift < 10 then   -- 超过 10 studs 视为异常，忽略
+            s.body[1] = clientHeadPos
+        end
+    end
 
     local head = s.body and s.body[1]
     if direction.Magnitude > 0.1 then
@@ -372,6 +380,17 @@ function SnakeGameService:ChangeDirection(player, direction)
     else
         s.isMoving = false
         DirectionChangedSignal:Fire(player.UserId, s.targetDirection, false, head)
+    end
+end
+
+-- 客户端定期上报自身头部位置，纠正服务端累积的位置偏差
+function SnakeGameService:SyncPosition(player, clientHeadPos)
+    local s = snakes[uid(player.UserId)]
+    if not s or not s.alive or not s.body or #s.body == 0 then return end
+    if not clientHeadPos then return end
+    local drift = (clientHeadPos - s.body[1]).Magnitude
+    if drift < 10 then
+        s.body[1] = clientHeadPos
     end
 end
 
@@ -472,7 +491,8 @@ function SnakeGameService.Client:GetGiftData(player) return playerDailyGifts[uid
 function SnakeGameService.Client:Spin(player) return self.Server:Spin(player) end
 function SnakeGameService.Client:GetSpins(player) return playerSpins[uid(player.UserId)] or 0 end
 function SnakeGameService.Client:GetGameState(p) return self.Server:GetGameState() end
-function SnakeGameService.Client:ChangeDirection(p, d) self.Server:ChangeDirection(p, d) end
+function SnakeGameService.Client:ChangeDirection(p, d, headPos) self.Server:ChangeDirection(p, d, headPos) end
+function SnakeGameService.Client:SyncPosition(p, headPos) self.Server:SyncPosition(p, headPos) end
 function SnakeGameService.Client:RequestRespawn(p) self.Server:RequestRespawn(p) end
 
 function SnakeGameService:RequestRevive(player, lostSize)
@@ -697,7 +717,183 @@ local function getGameStatePrivate()
     return state
 end
 
+local function killSnake(vKey, vSnake, kKey, kSnake)
+    local lostLength = vSnake.displayLength or #vSnake.body
+    vSnake.alive = false
+    local vPid = uidNum(vKey)
+    if vPid and vPid > 0 then
+        playerPendingRevive[uid(vPid)] = lostLength
+        playerPendingRevenge[uid(vPid)] = kKey
+    end
+    local killerName = (kSnake and kSnake.playerName) or "Unknown"
+    SnakeDiedSignal:Fire({
+        victimUserId = uidNum(vKey),
+        killedBy = killerName,
+        killerUid = kKey,
+        lostSize = lostLength,
+    })
+end
+
 local function moveSnakes()
+    -- ══ 阶段1：AI转向 + 计算所有蛇的新头部位置（暂不插入身体） ══
+    local nextHeads = {}  -- [k] = Vector3（仅 isMoving = true 的蛇）
+    local headRadii = {}  -- [k] = number（所有存活蛇的头球半径，与客户端渲染一致）
+
+    -- 先为所有存活蛇预计算头球半径，确保阶段2不会遇到 nil
+    for k, s in pairs(snakes) do
+        if s.alive and s.body and #s.body > 0 then
+            local vs = calculateVisualBodySize(s.score or 0) * (playerSizeMultiplier[k] or 1)
+            headRadii[k] = vs * 0.75
+        end
+    end
+
+    for k, s in pairs(snakes) do
+        if not (s.alive and s.isMoving and s.body and #s.body > 0) then continue end
+
+        -- AI 自动寻路
+        if s.isAI then
+            local now = os.clock()
+            local head = s.body[1]
+            if not s.aiNextThinkAt or now >= s.aiNextThinkAt then
+                s.aiNextThinkAt = now + 0.15 + math.random() * 0.15
+                local best, bestDist = nil, math.huge
+                for i = 1, #food do
+                    local f = food[i]
+                    local d = (f.pos - head).Magnitude
+                    if d < bestDist then bestDist = d; best = f end
+                end
+                local desired
+                if best then
+                    local jitter = Vector3.new((math.random()-0.5)*18, 0, (math.random()-0.5)*18)
+                    local v = best.pos + jitter - head
+                    if v.Magnitude > 0.1 then desired = v.Unit end
+                end
+                if not desired then
+                    desired = Vector3.new(math.random()*2-1, 0, math.random()*2-1)
+                    if desired.Magnitude > 0.1 then desired = desired.Unit end
+                end
+                s.aiDesiredDirection = desired
+                local bd = desired or s.targetDirection
+                if bd and bd.Magnitude > 0.1 then
+                    DirectionChangedSignal:Fire(uidNum(k), bd, true, head)
+                end
+            end
+            local desired = s.aiDesiredDirection or s.targetDirection
+            local cur = s.targetDirection or Vector3.new(1, 0, 0)
+            if desired and desired.Magnitude > 0.1 then
+                s.aiWobbleT = (s.aiWobbleT or 0) + 0.12
+                local wobble = Vector3.new(math.cos(s.aiWobbleT), 0, math.sin(s.aiWobbleT))
+                local nd = desired + wobble * 0.18
+                if nd.Magnitude > 0.1 then nd = nd.Unit end
+                local newDir = cur:Lerp(nd, 0.14)
+                if newDir.Magnitude > 0.1 then s.targetDirection = newDir.Unit end
+                s.isMoving = true
+            end
+        end
+
+        local head = s.body[1]
+        local mult = playerSpeedMultiplier[k] or 1
+        local nh = head + s.targetDirection * SNAKE_SPEED * GAME_TICK * mult
+        local limit = WALL_POSITION - (headRadii[k] or 0.5) - 0.2
+        nh = Vector3.new(math.clamp(nh.X, -limit, limit), 0, math.clamp(nh.Z, -limit, limit))
+        nextHeads[k] = nh
+    end
+
+    -- ══ 阶段2：头对头碰撞检测（用 nextHead 位置，消除顺序依赖） ══
+    -- 用两条蛇"本帧将落点"做对比，比 body[1] 早 1 帧检测到，
+    -- 避免因服务端同步延迟导致客户端视觉上看到"穿透"
+    local killed = {}  -- [k] = true，本帧已判死
+
+    for k, s in pairs(snakes) do
+        if not (s.alive and nextHeads[k]) then continue end
+        if killed[k] then continue end
+
+        for otherK, otherSnake in pairs(snakes) do
+            if otherK == k then continue end
+            if not (otherSnake.alive and otherSnake.body and #otherSnake.body > 0) then continue end
+            if killed[otherK] then continue end
+
+            -- 双方都有 nextHead 时用双方落点；对方静止则用其当前头部
+            local myNext    = nextHeads[k]
+            local otherNext = nextHeads[otherK] or otherSnake.body[1]
+            local dist = (myNext - otherNext).Magnitude
+            local threshold = headRadii[k] + (headRadii[otherK] or 0)
+            if dist >= threshold then continue end
+
+            local myScore    = s.score or 0
+            local otherScore = otherSnake.score or 0
+
+            if myScore > otherScore then
+                killSnake(otherK, otherSnake, k, s)
+                SnakeGameService:AddSnakeLength(uidNum(k), otherSnake.displayLength or #otherSnake.body)
+                killed[otherK] = true
+            elseif otherScore > myScore then
+                killSnake(k, s, otherK, otherSnake)
+                SnakeGameService:AddSnakeLength(uidNum(otherK), s.displayLength or #s.body)
+                killed[k] = true
+                break
+            else
+                -- 同等大小：两条都死，k < otherK 保证只执行一次
+                if k < otherK then
+                    killSnake(k, s, otherK, otherSnake)
+                    killSnake(otherK, otherSnake, k, s)
+                    killed[k]      = true
+                    killed[otherK] = true
+                end
+                break
+            end
+        end
+    end
+
+    -- ══ 阶段3：插入新头、食物检测、尾巴移除 ══
+    for k, s in pairs(snakes) do
+        if not (s.alive and s.isMoving and nextHeads[k]) then continue end
+
+        local nextHead = nextHeads[k]
+        table.insert(s.body, 1, nextHead)
+
+        -- 食物检测（拾取范围保持原有逻辑）
+        local radius = calculateSnakeRadius(s.score) * (playerSizeMultiplier[k] or 1)
+        local pickupRange = 6 + radius
+        local foodEaten = false
+        for i = #food, 1, -1 do
+            local f = food[i]
+            if (nextHead - f.pos).Magnitude < pickupRange then
+                if s.isAI then
+                    local now = os.clock()
+                    if (s.aiEatCooldownUntil or 0) > now then continue end
+                    s.aiEatCooldownUntil = now + 0.45
+                end
+                local growth = FOOD_GROWTH_MAP[f.value or 1] or 2
+                SnakeGameService:AddSnakeLength(uidNum(k), growth)
+                if not s.isAI then
+                    playerMoney[k] = (playerMoney[k] or 0) + 1
+                    local pid = uidNum(k)
+                    local p = (pid and pid > 0) and Players:GetPlayerByUserId(pid) or nil
+                    if p then MoneyChangedSignal:FireTo(p, playerMoney[k]) end
+                end
+                table.remove(food, i)
+                foodEaten = true
+                if s.isAI then break end
+            end
+        end
+        if foodEaten then
+            FoodChangedSignal:Fire(food)
+            local state = getGameStatePrivate()
+            LeaderboardChangedSignal:Fire(state.leaderboard, state.snakes)
+        end
+
+        -- 尾巴逻辑（生长中不移除尾巴）
+        if (s.growthPending or 0) > 0 then
+            s.growthPending = s.growthPending - 1
+        else
+            table.remove(s.body)
+        end
+    end
+end
+
+-- 旧单循环占位，已被三阶段逻辑取代，保留此注释便于 diff 追踪
+local function moveSnakes_UNUSED()
     for k, s in pairs(snakes) do
         -- k 是 "uXXXXXX" 格式；需要数字 userId 时用 uidNum(k)
         if s.alive and s.isMoving then
@@ -927,6 +1123,9 @@ local function moveSnakes()
 end
 
 function SnakeGameService:KnitInit()
+    -- 禁止 Roblox 自动加载玩家角色（蛇游戏不需要默认角色形象）
+    Players.CharacterAutoLoads = false
+
     -- 核心修复：删除默认 Baseplate 防止闪烁
     local baseplate = workspace:FindFirstChild("Baseplate")
     if baseplate then baseplate:Destroy() end
@@ -1009,10 +1208,10 @@ function SnakeGameService:KnitInit()
             end
         end
         
-        -- 每 3 帧广播一次所有蛇头坐标 + 方向（轻量数据，服务端真实值）
+        -- 每 2 帧广播一次所有蛇头坐标 + 方向（轻量数据，服务端真实值）
         -- 客户端直接用此数据更新坐标，不做预测漂移
         syncFrameCounter = syncFrameCounter + 1
-        if syncFrameCounter >= 3 then
+        if syncFrameCounter >= 2 then
             syncFrameCounter = 0
             local headData = {}
             for k, s in pairs(snakes) do

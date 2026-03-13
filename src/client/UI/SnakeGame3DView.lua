@@ -2,6 +2,10 @@ local Players = game:GetService("Players")
 local RunService = game:GetService("RunService")
 local TweenService = game:GetService("TweenService")
 local Workspace = game:GetService("Workspace")
+local UserInputService = game:GetService("UserInputService")
+
+-- 移动端判断：仅触屏且无鼠标时启用手动相机控制
+local isMobile = UserInputService.TouchEnabled and not UserInputService.MouseEnabled
 
 local SnakeGame3DView = {}
 
@@ -47,6 +51,11 @@ local GAME_TICK = 1/60
 local RING_RADIUS = 5.5
 local speedMultiplier = 1  -- 1 或 2，Robux 购买的 2x 速度
 local localSizeMultiplier = 1 -- 1 或 2，Robux 购买的 2x 体型（仅本地蛇预测/圈）
+
+-- 手动摄像机偏移（始终 Scriptable 跟随蛇头，右滑旋转，捏合缩放）
+local cameraOffset = nil   -- Vector3，nil = 蛇未存活
+local CAMERA_PITCH_MIN = math.rad(15)   -- 最小俯角（不贴地）
+local CAMERA_PITCH_MAX = math.rad(80)   -- 最大俯角（不垂直）
 
 local localPlayerSnakeState = nil
 local snakePositions = {}
@@ -104,20 +113,36 @@ local function getSnakeHeadUserIdFromPart(part)
 end
 
 local function hideCharacter(player)
-    if player and player.Character then
-        for _, part in ipairs(player.Character:GetDescendants()) do
-            if part:IsA("BasePart") then
-                part.Transparency = 1
-                part.CanCollide = false
-            elseif part:IsA("Decal") then
-                part.Transparency = 1
-            end
+    if not player then return end
+    local char = player.Character
+    if not char then return end
+
+    local function hidePart(p)
+        if p:IsA("BasePart") then
+            p.Transparency = 1
+            p.CanCollide = false
+            p.CastShadow = false
+        elseif p:IsA("Decal") or p:IsA("SpecialMesh") or p:IsA("SurfaceAppearance") then
+            p.Transparency = 1
         end
-        local hrp = player.Character:FindFirstChild("HumanoidRootPart")
-        if hrp then
-            hrp.Anchored = true
-            hrp.CFrame = CFrame.new(0, 100, 0)
-        end
+    end
+
+    -- 隐藏当前所有已加载的部件
+    for _, part in ipairs(char:GetDescendants()) do
+        hidePart(part)
+    end
+
+    -- 监听后续动态加载的配件（手机端加载较慢）
+    char.DescendantAdded:Connect(hidePart)
+
+    -- 将角色移到地图外，防止碰撞体影响玩法
+    local hrp = char:FindFirstChild("HumanoidRootPart")
+    if not hrp then
+        hrp = char:WaitForChild("HumanoidRootPart", 5)
+    end
+    if hrp then
+        hrp.Anchored = true
+        hrp.CFrame = CFrame.new(0, -2000, 0)
     end
 end
 
@@ -413,14 +438,18 @@ function SnakeGame3DView.Init()
     -- 客户端创建地面和围墙
     createEnvironment(gameFolder)
 
-    -- 事件驱动：角色重生时隐藏，不再用 while 轮询
+    -- 角色加载时立即隐藏（含 DescendantAdded 监听，手机端也不会漏掉）
     local function onCharacterAdded(char)
-        task.wait(0.1) -- 等角色完全加载
-        hideCharacter(Players.LocalPlayer)
+        -- 不用固定 wait，改为等 HumanoidRootPart 出现后再处理
+        task.spawn(function()
+            char:WaitForChild("HumanoidRootPart", 10)
+            hideCharacter(Players.LocalPlayer)
+        end)
     end
     Players.LocalPlayer.CharacterAdded:Connect(onCharacterAdded)
     if Players.LocalPlayer.Character then
-        onCharacterAdded(Players.LocalPlayer.Character)
+        -- 如果已经有角色（极少见），也立即隐藏
+        hideCharacter(Players.LocalPlayer)
     end
 
     -- 创建虚线圈 (20段)
@@ -799,14 +828,23 @@ function SnakeGame3DView.Init()
             end
         end
 
-        -- 3. 相机跟随本地玩家蛇头（死亡后冻结镜头，不跟随他人蛇）
-        if localPlayerSnakeState and #snakeParts > 0 then
-            local headPart = snakeParts[1]
-            local cam = Workspace.CurrentCamera
-            if cam then
-                if cam.CameraSubject ~= headPart then
+        -- 3. 相机跟随本地玩家蛇头
+        local cam = Workspace.CurrentCamera
+        if cam and localPlayerSnakeState and localPlayerSnakeState.body and #localPlayerSnakeState.body > 0 then
+            if isMobile and cameraOffset then
+                -- 移动端：Scriptable 手动跟随
+                if cam.CameraType ~= Enum.CameraType.Scriptable then
+                    cam.CameraType = Enum.CameraType.Scriptable
+                end
+                local head = localPlayerSnakeState.body[1]
+                cam.CFrame = CFrame.new(head + cameraOffset, head)
+            elseif not isMobile and #snakeParts > 0 then
+                -- PC 端：Custom 模式，Roblox 自动跟随蛇头部件
+                if cam.CameraType ~= Enum.CameraType.Custom then
                     cam.CameraType = Enum.CameraType.Custom
-                    cam.CameraSubject = headPart
+                end
+                if cam.CameraSubject ~= snakeParts[1] then
+                    cam.CameraSubject = snakeParts[1]
                 end
             end
         end
@@ -843,10 +881,24 @@ function SnakeGame3DView.SpawnSnake(userId, body, color, initDisplayLength)
             sizeMultiplier = localSizeMultiplier or 1,
             color = color or Color3.fromRGB(255, 210, 60),
         }
-        -- 复活时恢复镜头为 Custom 模式，让 Heartbeat 重新绑定 CameraSubject
         local cam = Workspace.CurrentCamera
         if cam then
-            cam.CameraType = Enum.CameraType.Custom
+            if isMobile then
+                -- 移动端：Scriptable 手动跟随，初始化相机偏移
+                cam.CameraType = Enum.CameraType.Scriptable
+                local spawnHead = body[1] or Vector3.new(0, 0, 0)
+                local offset = cam.CFrame.Position - spawnHead
+                if offset.Magnitude < 5 then
+                    local dist = 70
+                    local pitch = math.rad(50)
+                    offset = Vector3.new(0, dist * math.sin(pitch), dist * math.cos(pitch))
+                end
+                cameraOffset = offset
+            else
+                -- PC 端：Custom 模式，Roblox 自动跟随（鼠标旋转 + 滚轮缩放）
+                cam.CameraType = Enum.CameraType.Custom
+                cameraOffset = nil
+            end
         end
     else
         local p = Players:GetPlayerByUserId(uidNum(userId))
@@ -1013,11 +1065,17 @@ function SnakeGame3DView.RemoveSnake(userId)
     userId = tostring(userId)
     if userId == uid(Players.LocalPlayer.UserId) then
         localPlayerSnakeState = nil
-        -- 死亡后冻结镜头：切换为 Scriptable 并锁定当前 CFrame，防止镜头跟随其他蛇移动
+        cameraOffset = nil
+        -- 死亡后冻结镜头
         local cam = Workspace.CurrentCamera
         if cam then
-            cam.CameraType = Enum.CameraType.Scriptable
-            -- CFrame 保持不变，镜头停在原地
+            if isMobile then
+                -- 移动端：Scriptable 冻结在死亡位置
+                cam.CameraType = Enum.CameraType.Scriptable
+            else
+                -- PC 端：Custom 模式，让玩家仍可用鼠标转动等待复活
+                cam.CameraType = Enum.CameraType.Custom
+            end
         end
     else
         otherSnakes[userId] = nil
@@ -1134,6 +1192,42 @@ function SnakeGame3DView.GetLocalHeadPos()
         return localPlayerSnakeState.body[1]
     end
     return nil
+end
+
+-- 右侧拖动：围绕蛇头旋转镜头（dx=水平像素差, dy=垂直像素差）
+function SnakeGame3DView.RotateCameraOffset(dx, dy)
+    if not cameraOffset then return end
+
+    local sensitivity = 0.004
+    local yawDelta   = -dx * sensitivity   -- 水平拖动 = 偏航（绕 Y 轴）
+    local pitchDelta = dy * sensitivity    -- 垂直拖动 = 俯仰（向上拖 = 俯角减小 = 拉远视角）
+
+    local dist = cameraOffset.Magnitude
+    if dist < 0.01 then return end
+    local n = cameraOffset / dist   -- 单位方向
+
+    -- 偏航：绕世界 Y 轴旋转
+    local cosY = math.cos(yawDelta)
+    local sinY = math.sin(yawDelta)
+    n = Vector3.new(n.X * cosY + n.Z * sinY, n.Y, -n.X * sinY + n.Z * cosY)
+
+    -- 俯仰：计算当前仰角，叠加增量后夹紧
+    local horizMag = math.sqrt(n.X^2 + n.Z^2)
+    local currentPitch = math.atan2(n.Y, horizMag)
+    local newPitch = math.clamp(currentPitch + pitchDelta, CAMERA_PITCH_MIN, CAMERA_PITCH_MAX)
+    local newHoriz = math.cos(newPitch)
+    local scale = horizMag > 0.001 and (newHoriz / horizMag) or 0
+    n = Vector3.new(n.X * scale, math.sin(newPitch), n.Z * scale)
+
+    cameraOffset = n * dist
+end
+
+-- 双指捏合：缩放镜头距离（factor > 1 = 拉近，< 1 = 推远）
+function SnakeGame3DView.ZoomCameraOffset(factor)
+    if not cameraOffset then return end
+    local dist = cameraOffset.Magnitude
+    local newDist = math.clamp(dist / factor, 20, 200)
+    cameraOffset = cameraOffset.Unit * newDist
 end
 
 return SnakeGame3DView

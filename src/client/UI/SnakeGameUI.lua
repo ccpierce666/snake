@@ -19,18 +19,18 @@ local contentHandle = nil
 
 -- 奖励配置表 (与服务器保持一致)
 local GIFT_REWARDS = {
-    { time = 30, type = "Length", amount = 1000 },       -- 00:30
-    { time = 90, type = "Length", amount = 3000 },       -- 01:30
-    { time = 180, type = "Spin", amount = 1 },           -- 03:00
-    { time = 300, type = "Length", amount = 5000 },      -- 05:00
-    { time = 600, type = "Length", amount = 10000 },     -- 10:00
-    { time = 900, type = "Spin", amount = 2 },           -- 15:00
-    { time = 1200, type = "Length", amount = 25000 },    -- 20:00
-    { time = 1800, type = "Length", amount = 30000 },    -- 30:00
-    { time = 2100, type = "Spin", amount = 3 },          -- 35:00
-    { time = 3000, type = "Length", amount = 100000 },   -- 50:00
-    { time = 4200, type = "Length", amount = 250000 },   -- 70:00
-    { time = 5400, type = "Length", amount = 1000000 },  -- 90:00
+    { time = 30,   type = "Length", amount = 1000 },     -- 00:30  格1
+    { time = 90,   type = "Length", amount = 3000 },     -- 01:30  格2
+    { time = 180,  type = "Cash",   amount = 2000 },     -- 03:00  格3
+    { time = 300,  type = "Length", amount = 5000 },     -- 05:00  格4
+    { time = 600,  type = "Length", amount = 10000 },    -- 10:00  格5
+    { time = 900,  type = "Cash",   amount = 5000 },     -- 15:00  格6
+    { time = 1200, type = "Length", amount = 25000 },    -- 20:00  格7
+    { time = 1800, type = "Length", amount = 30000 },    -- 30:00  格8
+    { time = 2100, type = "Cash",   amount = 10000 },    -- 35:00  格9
+    { time = 3000, type = "Length", amount = 100000 },   -- 50:00  格10
+    { time = 4200, type = "Length", amount = 250000 },   -- 70:00  格11
+    { time = 5400, type = "Length", amount = 1000000 },  -- 90:00  格12
 }
 
 local function el(className, props, children)
@@ -515,7 +515,7 @@ local function GiftPanel(props)
             statusColor = Color3.fromRGB(60, 220, 60)
         end
         
-        local iconId = (reward.type == "Length") and "rbxassetid://89074978607958" or "rbxassetid://6034706260"
+        local iconId = (reward.type == "Cash") and "rbxassetid://105300168575798" or "rbxassetid://89074978607958"
         
         listItems["Item"..i] = el("Frame", {
             BackgroundColor3 = itemBgColor,

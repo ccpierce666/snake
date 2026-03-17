@@ -119,15 +119,15 @@ end
 
 -- 奖励配置
 local GIFT_REWARDS = {
-    { time = 30, type = "Length", amount = 1000 },
-    { time = 90, type = "Length", amount = 3000 },
-    { time = 180, type = "Spin", amount = 1 },
-    { time = 300, type = "Length", amount = 5000 },
-    { time = 600, type = "Length", amount = 10000 },
-    { time = 900, type = "Spin", amount = 2 },
+    { time = 30,   type = "Length", amount = 1000 },
+    { time = 90,   type = "Length", amount = 3000 },
+    { time = 180,  type = "Cash",   amount = 2000 },
+    { time = 300,  type = "Length", amount = 5000 },
+    { time = 600,  type = "Length", amount = 10000 },
+    { time = 900,  type = "Cash",   amount = 5000 },
     { time = 1200, type = "Length", amount = 25000 },
     { time = 1800, type = "Length", amount = 30000 },
-    { time = 2100, type = "Spin", amount = 3 },
+    { time = 2100, type = "Cash",   amount = 10000 },
     { time = 3000, type = "Length", amount = 100000 },
     { time = 4200, type = "Length", amount = 250000 },
     { time = 5400, type = "Length", amount = 1000000 },
@@ -351,6 +351,10 @@ function SnakeGameService:ClaimGift(player, index)
         self:AddSnakeLength(player.UserId, reward.amount)
     elseif reward.type == "Spin" then
         playerSpins[key] = (playerSpins[key] or 0) + reward.amount
+    elseif reward.type == "Cash" then
+        playerMoney[key] = (playerMoney[key] or 0) + reward.amount
+        saveMoney(player.UserId)
+        MoneyChangedSignal:FireTo(player, playerMoney[key])
     end
     
     pcall(function() giftStore:SetAsync("gift_" .. tostring(player.UserId), data) end)

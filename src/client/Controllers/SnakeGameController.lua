@@ -23,7 +23,7 @@ function SnakeGameController:KnitStart()
 
     -- 1. 定义本地游戏状态 (Before UI Start)
     local ClientState = {
-        score = 0,
+        score = 2,  -- 初始蛇身长度 = INITIAL_LENGTH
         money = 0,
         leaderboard = {},
         food = {},
@@ -259,8 +259,10 @@ function SnakeGameController:KnitStart()
                 SnakeGame3DView.UpdateSnakeData(ukey, syncData)
                 
                 if ukey == localId then
-                    lastScore = score
-                    ClientState.score = score
+                    -- 显示 displayLength（蛇身实际长度，初始为 INITIAL_LENGTH=2）而非 food score（从0开始）
+                    local displayLen = entry.length or score
+                    lastScore = displayLen
+                    ClientState.score = displayLen
                 end
             end
 

@@ -832,9 +832,13 @@ function SnakeGame3DView.Init()
         local cam = Workspace.CurrentCamera
         if cam and localPlayerSnakeState and localPlayerSnakeState.body and #localPlayerSnakeState.body > 0 then
             if isMobile and cameraOffset then
-                -- 移动端：Scriptable 手动跟随
+                -- 移动端：Scriptable 手动控制 CFrame
                 if cam.CameraType ~= Enum.CameraType.Scriptable then
                     cam.CameraType = Enum.CameraType.Scriptable
+                end
+                -- 必须设 CameraSubject，否则 StreamingEnabled 会按角色位置(-2000Y)决定加载范围
+                if #snakeParts > 0 and cam.CameraSubject ~= snakeParts[1] then
+                    cam.CameraSubject = snakeParts[1]
                 end
                 local head = localPlayerSnakeState.body[1]
                 cam.CFrame = CFrame.new(head + cameraOffset, head)
@@ -886,6 +890,10 @@ function SnakeGame3DView.SpawnSnake(userId, body, color, initDisplayLength)
             if isMobile then
                 -- 移动端：Scriptable 手动跟随，初始化相机偏移
                 cam.CameraType = Enum.CameraType.Scriptable
+                -- 提前设好 CameraSubject（snakeParts 可能还没建好，等 Heartbeat 补上）
+                if #snakeParts > 0 then
+                    cam.CameraSubject = snakeParts[1]
+                end
                 local spawnHead = body[1] or Vector3.new(0, 0, 0)
                 local offset = cam.CFrame.Position - spawnHead
                 if offset.Magnitude < 5 then

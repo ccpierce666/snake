@@ -19,6 +19,7 @@ local SpeedMultiplierChangedSignal = Knit.CreateSignal()
 local SizeMultiplierChangedSignal = Knit.CreateSignal()
 local KillAllSignal = Knit.CreateSignal()
 local SnakeSyncSignal = Knit.CreateSignal()
+local StateSnapshotSignal = Knit.CreateSignal()
 
 local SnakeGameService = Knit.CreateService {
     Name = "SnakeGameService",
@@ -34,6 +35,7 @@ local SnakeGameService = Knit.CreateService {
         SizeMultiplierChanged = SizeMultiplierChangedSignal,
         KillAll = KillAllSignal,
         SnakeSync = SnakeSyncSignal,
+        StateSnapshot = StateSnapshotSignal,
     },
 }
 
@@ -49,14 +51,27 @@ SnakeGameService.SpeedMultiplierChanged = SpeedMultiplierChangedSignal
 SnakeGameService.SizeMultiplierChanged = SizeMultiplierChangedSignal
 SnakeGameService.KillAll = KillAllSignal
 SnakeGameService.SnakeSync = SnakeSyncSignal
+SnakeGameService.StateSnapshot = StateSnapshotSignal
 
 -- 声明服务器方法（客户端代理会拦截这些调用）
 function SnakeGameService:GetGameState()
     -- 客户端版本只是占位符，实际调用会被 Knit 代理转发到服务器
 end
 
+function SnakeGameService:SubscribeRealtime()
+end
+
 function SnakeGameService:ChangeDirection(direction)
     -- 客户端版本只是占位符，实际调用会被 Knit 代理转发到服务器
+end
+
+function SnakeGameService:SyncPosition(headPos)
+end
+
+function SnakeGameService:Spin()
+end
+
+function SnakeGameService:GetSpins()
 end
 
 function SnakeGameService:RequestRespawn()

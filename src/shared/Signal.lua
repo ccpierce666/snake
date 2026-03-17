@@ -16,7 +16,16 @@ function Signal:Connect(callback)
     }
     
     function connection:Disconnect()
+        if not self.Connected then return end
         self.Connected = false
+        local signal = self._signal
+        if not signal or not signal._connections then return end
+        for i = #signal._connections, 1, -1 do
+            if signal._connections[i] == self then
+                table.remove(signal._connections, i)
+                break
+            end
+        end
     end
     
     table.insert(self._connections, connection)

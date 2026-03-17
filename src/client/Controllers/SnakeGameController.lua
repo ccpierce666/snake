@@ -38,7 +38,12 @@ function SnakeGameController:KnitStart()
     local lastScore = 0
     local lastUiUpdateAt = 0
     local UI_UPDATE_INTERVAL = 0.25 -- 节流：每秒最多 4 次，避免 Roact 重建导致按钮点不到
-    local function safeUiUpdate()
+    local function requestUiUpdate(force)
+        if force then
+            lastUiUpdateAt = os.clock()
+            SnakeGameUI.Update(ClientState)
+            return
+        end
         local now = os.clock()
         if now - lastUiUpdateAt < UI_UPDATE_INTERVAL then
             return
@@ -55,7 +60,7 @@ function SnakeGameController:KnitStart()
     SnakeGameUI.Callbacks.onAutoToggle = function()
         isAutoMode = not isAutoMode
         ClientState.autoMode = isAutoMode
-        SnakeGameUI.Update(ClientState)
+        requestUiUpdate(true)
         print("[SnakeGameController] 自动模式切换为:", isAutoMode)
 
         -- 如果关闭自动模式，立即停止移动
@@ -69,20 +74,20 @@ function SnakeGameController:KnitStart()
 
     SnakeGameUI.Callbacks.onToggleGiftPanel = function()
         ClientState.showGiftPanel = not ClientState.showGiftPanel
-        SnakeGameUI.Update(ClientState)
+        requestUiUpdate(true)
     end
 
     SnakeGameUI.Callbacks.onToggleSpin = function()
         ClientState.showSpinPanel = not ClientState.showSpinPanel
         SpinWheelUI.Update(ClientState)
-        SnakeGameUI.Update(ClientState)
+        requestUiUpdate(true)
     end
 
     -- 抽奖相关回调
     SpinWheelUI.Callbacks.onClose = function()
         ClientState.showSpinPanel = false
         SpinWheelUI.Update(ClientState)
-        SnakeGameUI.Update(ClientState)
+        requestUiUpdate(true)
     end
 
     SpinWheelUI.Callbacks.onSpin = function(callback)
@@ -127,7 +132,7 @@ function SnakeGameController:KnitStart()
                         ClientState.giftData.claimed = ClientState.giftData.claimed or {}
                         ClientState.giftData.claimed[tostring(index)] = true
                     end
-                    SnakeGameUI.Update(ClientState)
+                    requestUiUpdate(true)
                 else
                     warn("[Gift] 服务器返回领取失败，index=" .. tostring(index))
                 end
@@ -140,7 +145,7 @@ function SnakeGameController:KnitStart()
     -- 死亡面板回调
     local function doRespawn()
         ClientState.isDead = false
-        SnakeGameUI.Update(ClientState)
+        requestUiUpdate(true)
         pcall(function() SnakeGameService:RequestRespawn() end)
     end
 
@@ -210,7 +215,7 @@ function SnakeGameController:KnitStart()
             -- 只有 spawnPos 有效（非 nil/空）时才关闭，防止 CharacterAdded 误触发
             if userId == Players.LocalPlayer.UserId and spawnPos then
                 ClientState.isDead = false
-                SnakeGameUI.Update(ClientState)
+                requestUiUpdate(true)
             end
         end)
     end
@@ -268,7 +273,7 @@ function SnakeGameController:KnitStart()
 
             -- 死亡面板显示时不刷新 UI，防止打断 Respawn 按钮点击
             if not ClientState.isDead then
-                safeUiUpdate()
+                requestUiUpdate(false)
             end
         end)
     end
@@ -298,10 +303,12 @@ function SnakeGameController:KnitStart()
     if SnakeGameService.MoneyChanged then
         SnakeGameService.MoneyChanged:Connect(function(money)
             ClientState.money = money
+            requestUiUpdate(false)
             if ClientState.isDead then return end
             local headPos = SnakeGame3DView.GetLocalHeadPos and SnakeGame3DView.GetLocalHeadPos()
             if not headPos then return end
             local camera = workspace.CurrentCamera
+            if not camera then return end
             local sp, onScr = camera:WorldToViewportPoint(headPos)
             if onScr then
                 SnakeGameUI.PlayEatEffect(Vector2.new(sp.X, sp.Y))
@@ -314,7 +321,7 @@ function SnakeGameController:KnitStart()
         SnakeGameService.SpeedMultiplierChanged:Connect(function(mult)
             ClientState.speedMultiplier = mult or 1
             SnakeGame3DView.SetSpeedMultiplier(ClientState.speedMultiplier)
-            safeUiUpdate()
+            requestUiUpdate(false)
         end)
     end
 
@@ -322,7 +329,7 @@ function SnakeGameController:KnitStart()
         SnakeGameService.SizeMultiplierChanged:Connect(function(mult)
             ClientState.sizeMultiplier = mult or 1
             SnakeGame3DView.SetLocalSizeMultiplier(ClientState.sizeMultiplier)
-            safeUiUpdate()
+            requestUiUpdate(false)
         end)
     end
 
@@ -330,7 +337,7 @@ function SnakeGameController:KnitStart()
     if SnakeGameService.GiftUpdate then
         SnakeGameService.GiftUpdate:Connect(function(data)
             ClientState.giftData = data
-            SnakeGameUI.Update(ClientState)
+            requestUiUpdate(false)
         end)
     end
     
@@ -338,7 +345,7 @@ function SnakeGameController:KnitStart()
     if SnakeGameService.SpinsChanged then
         SnakeGameService.SpinsChanged:Connect(function(spinsLeft)
             ClientState.spins = spinsLeft or 0
-            safeUiUpdate()
+            requestUiUpdate(false)
         end)
     end
     -- 初始加载抽奖次数
@@ -346,7 +353,7 @@ function SnakeGameController:KnitStart()
         local ok, spins = pcall(function() return SnakeGameService:GetSpins() end)
         if ok and spins then
             ClientState.spins = spins
-            safeUiUpdate()
+            requestUiUpdate(false)
         end
     end)
     
@@ -374,24 +381,94 @@ function SnakeGameController:KnitStart()
                 ClientState.killedBy = deathData.killedBy or "Unknown"
                 ClientState.killerUid = deathData.killerUid or ""
                 ClientState.lostSize = deathData.lostSize or 0
-                SnakeGameUI.Update(ClientState)
+                requestUiUpdate(true)
             end
         end)
     end
 
-    -- 6. 获取初始状态（带重试）
+    local function applyRealtimeSnapshot(snapshot)
+        if not snapshot then return end
+        local state = snapshot.state
+        if not state or not state.snakes then return end
+
+        for userId, s in pairs(state.snakes) do
+            if s.alive and s.body and #s.body > 0 then
+                SnakeGame3DView.SpawnSnake(userId, s.body, s.color, s.displayLength)
+                SnakeGame3DView.UpdateSnakeData(userId, {
+                    dir = s.direction,
+                    isMoving = s.isMoving,
+                    score = s.score,
+                    displayLength = s.displayLength,
+                    sizeMultiplier = s.sizeMultiplier,
+                    body = s.body,
+                    playerName = s.playerName,
+                })
+            end
+        end
+
+        if state.food then
+            ClientState.food = state.food
+            SnakeGame3DView.UpdateFood(state.food)
+        end
+
+        if state.leaderboard then
+            ClientState.leaderboard = state.leaderboard
+            local localNumId = Players.LocalPlayer.UserId
+            for _, entry in ipairs(state.leaderboard) do
+                if entry.userId == localNumId then
+                    lastScore = entry.length or entry.score or 0
+                    ClientState.score = lastScore
+                    break
+                end
+            end
+        end
+
+        if snapshot.giftData then
+            ClientState.giftData = snapshot.giftData
+        end
+        if snapshot.spins ~= nil then
+            ClientState.spins = snapshot.spins
+        end
+        if snapshot.money ~= nil then
+            ClientState.money = snapshot.money
+        end
+        if snapshot.speedMultiplier and snapshot.speedMultiplier >= 2 then
+            ClientState.speedMultiplier = 2
+            SnakeGame3DView.SetSpeedMultiplier(2)
+        end
+        if snapshot.sizeMultiplier and snapshot.sizeMultiplier >= 2 then
+            ClientState.sizeMultiplier = 2
+            SnakeGame3DView.SetLocalSizeMultiplier(2)
+        end
+
+        requestUiUpdate(true)
+    end
+
+    if SnakeGameService.StateSnapshot then
+        SnakeGameService.StateSnapshot:Connect(function(snapshot)
+            applyRealtimeSnapshot(snapshot)
+        end)
+    end
+
     task.spawn(function()
-        -- 获取礼物数据
+        for i = 1, 8 do
+            local success, snapshot = pcall(function()
+                return SnakeGameService:SubscribeRealtime()
+            end)
+            if success and snapshot and snapshot.state and snapshot.state.snakes then
+                print("[SnakeGameController] 长连接快照就绪 (第" .. i .. "次)")
+                applyRealtimeSnapshot(snapshot)
+                return
+            end
+            task.wait(0.2)
+        end
+
         local successGift, giftData = pcall(function()
             return SnakeGameService:GetGiftData()
         end)
         if successGift and giftData then
             ClientState.giftData = giftData
-            -- 【临时禁用】SnakeGameUI.Update(ClientState)
         end
-
-        -- 获取抽奖次数将通过 SpinsChanged 信号在线获取，初始为 0
-        -- ClientState.spins 初始值已设为 0
 
         for i = 1, 20 do
             local success, state = pcall(function()
@@ -399,32 +476,28 @@ function SnakeGameController:KnitStart()
             end)
 
             if success and state and state.snakes then
-                print("[SnakeGameController] 获取初始状态成功 (第" .. i .. "次)")
+                print("[SnakeGameController] 回退拉取状态成功 (第" .. i .. "次)")
 
-                -- 初始化所有蛇（传完整 body + color + displayLength，避免只显示头部）
                 for userId, s in pairs(state.snakes) do
                     if s.alive and s.body and #s.body > 0 then
                         SnakeGame3DView.SpawnSnake(userId, s.body, s.color, s.displayLength)
-                        -- 同步方向/移动状态，使客户端预测立即生效
                         SnakeGame3DView.UpdateSnakeData(userId, {
-                            dir          = s.direction,
-                            isMoving     = s.isMoving,
-                            score        = s.score,
+                            dir = s.direction,
+                            isMoving = s.isMoving,
+                            score = s.score,
                             displayLength = s.displayLength,
                             sizeMultiplier = s.sizeMultiplier,
-                            body         = s.body,
-                            playerName   = s.playerName,
+                            body = s.body,
+                            playerName = s.playerName,
                         })
                     end
                 end
 
-                -- 初始化食物
                 if state.food then
                     ClientState.food = state.food
                     SnakeGame3DView.UpdateFood(state.food)
                 end
 
-                -- 初始化排行榜（用 entry.length = displayLength，初始显示 2 而不是 0）
                 if state.leaderboard then
                     ClientState.leaderboard = state.leaderboard
                     local localNumId = Players.LocalPlayer.UserId
@@ -437,26 +510,28 @@ function SnakeGameController:KnitStart()
                     end
                 end
 
-                -- 获取 2x 速度状态（已购买则持久化）
-                local ok, mult = pcall(function() return SnakeGameService:GetSpeedMultiplier() end)
-                if ok and mult and mult >= 2 then
+                local okSpins, spins = pcall(function() return SnakeGameService:GetSpins() end)
+                if okSpins and spins ~= nil then
+                    ClientState.spins = spins
+                end
+
+                local okSpeed, mult = pcall(function() return SnakeGameService:GetSpeedMultiplier() end)
+                if okSpeed and mult and mult >= 2 then
                     ClientState.speedMultiplier = 2
                     SnakeGame3DView.SetSpeedMultiplier(2)
                 end
 
-                -- 获取 2x 体型状态（已购买则持久化）
-                local ok2, sm = pcall(function() return SnakeGameService:GetSizeMultiplier() end)
-                if ok2 and sm and sm >= 2 then
+                local okSize, sm = pcall(function() return SnakeGameService:GetSizeMultiplier() end)
+                if okSize and sm and sm >= 2 then
                     ClientState.sizeMultiplier = 2
                     SnakeGame3DView.SetLocalSizeMultiplier(2)
                 end
 
-                SnakeGameUI.Update(ClientState)
-                break
-            else
-                print("[SnakeGameController] 获取初始状态失败 (第" .. i .. "次)，0.2秒后重试...")
-                task.wait(0.2)   -- 从 1s 缩短到 0.2s，加快恢复速度
+                requestUiUpdate(true)
+                return
             end
+
+            task.wait(0.2)
         end
     end)
 
@@ -468,7 +543,7 @@ function SnakeGameController:KnitStart()
         if isAutoMode then
              isAutoMode = false
              ClientState.autoMode = false
-             SnakeGameUI.Update(ClientState)
+             requestUiUpdate(true)
              print("[SnakeGameController] 用户操作，自动模式关闭")
         end
 
@@ -578,7 +653,7 @@ function SnakeGameController:KnitStart()
                 if isAutoMode then
                     isAutoMode = false
                     ClientState.autoMode = false
-                    SnakeGameUI.Update(ClientState)
+                    requestUiUpdate(true)
                 end
                 local cam = Workspace.CurrentCamera
                 if cam then
@@ -657,7 +732,7 @@ function SnakeGameController:KnitStart()
             if ClientState.giftData then
                 ClientState.giftData.timePlayed = (ClientState.giftData.timePlayed or 0) + 1
                 if ClientState.showGiftPanel then
-                    SnakeGameUI.Update(ClientState)
+                    requestUiUpdate(false)
                 end
             end
         end

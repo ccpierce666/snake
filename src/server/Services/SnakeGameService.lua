@@ -754,42 +754,108 @@ local function moveSnakes()
     for k, s in pairs(snakes) do
         if not (s.alive and s.isMoving and s.body and #s.body > 0) then continue end
 
-        -- AI 自动寻路
+        -- AI 自动寻路（含玩家猎杀逻辑）
         if s.isAI then
             local now = os.clock()
             local head = s.body[1]
             if not s.aiNextThinkAt or now >= s.aiNextThinkAt then
-                s.aiNextThinkAt = now + 0.15 + math.random() * 0.15
-                local best, bestDist = nil, math.huge
-                for i = 1, #food do
-                    local f = food[i]
-                    local d = (f.pos - head).Magnitude
-                    if d < bestDist then bestDist = d; best = f end
+                -- 大蛇思考更快（缩短间隔），小蛇思考更慢
+                local myScore = s.score or 0
+                local thinkInterval = myScore > 5000 and 0.08 or (0.15 + math.random() * 0.15)
+                s.aiNextThinkAt = now + thinkInterval
+
+                -- ── 1. 搜索附近玩家蛇 ──────────────────────────────
+                -- 检测范围随 AI 体型增大（大蛇视野更广）
+                local huntRange = 40 + math.min(myScore * 0.02, 60)  -- 40~100 studs
+                local huntTarget      = nil
+                local huntTargetKey   = nil
+                local huntDist        = math.huge
+
+                for otherK, otherSnake in pairs(snakes) do
+                    if otherK == k then continue end
+                    if not (otherSnake.alive and otherSnake.body and #otherSnake.body > 0) then continue end
+                    if otherSnake.isAI then continue end  -- 只猎杀真实玩家
+                    local d = (otherSnake.body[1] - head).Magnitude
+                    if d < huntRange and d < huntDist then
+                        huntDist      = d
+                        huntTarget    = otherSnake
+                        huntTargetKey = otherK
+                    end
                 end
-                local desired
-                if best then
-                    local jitter = Vector3.new((math.random()-0.5)*18, 0, (math.random()-0.5)*18)
-                    local v = best.pos + jitter - head
-                    if v.Magnitude > 0.1 then desired = v.Unit end
+
+                local desired = nil
+                local isHunting = false
+
+                -- ── 2. 根据大小决定猎杀或逃跑 ─────────────────────
+                if huntTarget then
+                    local targetScore = huntTarget.score or 0
+                    local targetHead  = huntTarget.body[1]
+                    local targetDir   = huntTarget.targetDirection or Vector3.new(1,0,0)
+
+                    if myScore >= targetScore then
+                        -- 大于等于目标：猎杀模式——预判玩家运动方向，提前拦截
+                        -- 预判量 = 距离越远、预判越多（最多提前 1.5 秒）
+                        local speed        = SNAKE_SPEED * GAME_TICK * 60  -- studs/s
+                        local timeToTarget = math.min(huntDist / math.max(speed, 0.1), 1.5)
+                        local predicted    = targetHead + targetDir * speed * timeToTarget * 0.6
+                        local v = predicted - head
+                        if v.Magnitude > 0.1 then
+                            desired    = v.Unit
+                            isHunting  = true
+                        end
+                    elseif targetScore > myScore * 1.3 then
+                        -- 比目标小很多：逃跑模式——背向目标
+                        local away = head - targetHead
+                        if away.Magnitude > 0.1 then
+                            desired = away.Unit
+                        end
+                    end
+                    -- 两者差不多大时：忽视玩家，继续吃食物（避免白白送死）
                 end
+
+                -- ── 3. 无猎杀/逃跑目标：寻找最近食物 ─────────────
+                if not desired then
+                    local best, bestDist2 = nil, math.huge
+                    for i = 1, #food do
+                        local f  = food[i]
+                        local fd = (f.pos - head).Magnitude
+                        if fd < bestDist2 then bestDist2 = fd; best = f end
+                    end
+                    if best then
+                        -- 猎杀模式结束后适当减少抖动，提升追食物的准度
+                        local jitterAmt = isHunting and 6 or 18
+                        local jitter = Vector3.new((math.random()-0.5)*jitterAmt, 0, (math.random()-0.5)*jitterAmt)
+                        local v = best.pos + jitter - head
+                        if v.Magnitude > 0.1 then desired = v.Unit end
+                    end
+                end
+
+                -- ── 4. 兜底随机游走 ─────────────────────────────────
                 if not desired then
                     desired = Vector3.new(math.random()*2-1, 0, math.random()*2-1)
                     if desired.Magnitude > 0.1 then desired = desired.Unit end
                 end
+
                 s.aiDesiredDirection = desired
+                s.aiIsHunting        = isHunting
                 local bd = desired or s.targetDirection
                 if bd and bd.Magnitude > 0.1 then
                     DirectionChangedSignal:Fire(uidNum(k), bd, true, head)
                 end
             end
+
+            -- ── 转向平滑（猎杀时转向更灵敏）─────────────────────────
             local desired = s.aiDesiredDirection or s.targetDirection
-            local cur = s.targetDirection or Vector3.new(1, 0, 0)
+            local cur     = s.targetDirection or Vector3.new(1, 0, 0)
             if desired and desired.Magnitude > 0.1 then
+                local lerpFactor = s.aiIsHunting and 0.28 or 0.14  -- 猎杀时转向 2 倍灵敏
                 s.aiWobbleT = (s.aiWobbleT or 0) + 0.12
+                -- 猎杀时减少晃动，追得更准；普通觅食时保留随机性
+                local wobbleAmt = s.aiIsHunting and 0.05 or 0.18
                 local wobble = Vector3.new(math.cos(s.aiWobbleT), 0, math.sin(s.aiWobbleT))
-                local nd = desired + wobble * 0.18
+                local nd = desired + wobble * wobbleAmt
                 if nd.Magnitude > 0.1 then nd = nd.Unit end
-                local newDir = cur:Lerp(nd, 0.14)
+                local newDir = cur:Lerp(nd, lerpFactor)
                 if newDir.Magnitude > 0.1 then s.targetDirection = newDir.Unit end
                 s.isMoving = true
             end

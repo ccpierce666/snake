@@ -414,7 +414,8 @@ function SnakeGameService:RequestRespawn(player)
         alive = true,
         growthPending = 0,
         pendingGrowthScore = 0,
-        displayLength = INITIAL_LENGTH
+        displayLength = INITIAL_LENGTH,
+        playerName = player.Name,
     }
     SnakeSpawnedSignal:Fire(player.UserId, body, assignSkinColor(player.UserId), INITIAL_LENGTH)
     
@@ -1443,20 +1444,19 @@ function SnakeGameService:KnitInit()
         playerFoodCounts[key] = 0
         playerSpeedMultiplier[key] = loadSpeedMultiplier(p.UserId)
         playerSizeMultiplier[key] = loadSizeMultiplier(p.UserId)
-        
-        task.delay(1, function()
-            MoneyChangedSignal:FireTo(p, playerMoney[key])
+
+        -- 稍等客户端 Knit 完成信号绑定后再生成蛇，避免 SnakeSpawnedSignal 比客户端先到
+        task.delay(0.5, function()
+            if not p or not p.Parent then return end  -- 玩家已离开
+            self:RequestRespawn(p)
+            -- 金币数据同时下发
+            MoneyChangedSignal:FireTo(p, playerMoney[key] or 0)
         end)
-        
-        self:RequestRespawn(p)
-        
+
+        -- CharacterAdded 仅用于移动端角色隐藏同步，不重复触发 SnakeSpawned
         p.CharacterAdded:Connect(function()
-            task.wait(0.5)
-            local sn = snakes[uid(p.UserId)]
-            -- 只有蛇存活时才通知客户端，避免死亡后角色自动重生把死亡面板关掉
-            if sn and sn.alive then
-                SnakeSpawnedSignal:Fire(p.UserId, sn.body, assignSkinColor(p.UserId), sn.displayLength or INITIAL_LENGTH)
-            end
+            -- 不再通过 CharacterAdded 重新广播 SnakeSpawned，
+            -- 客户端通过 GetGameState() 轮询获取完整初始状态
         end)
     end)
     

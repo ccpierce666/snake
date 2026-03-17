@@ -73,16 +73,16 @@ function SnakeGameController:KnitStart()
     end
 
     SnakeGameUI.Callbacks.onToggleSpin = function()
-        print("[SnakeGameController] 切换抽奖面板，当前状态:", ClientState.showSpinPanel)
         ClientState.showSpinPanel = not ClientState.showSpinPanel
-        print("[SnakeGameController] 新状态:", ClientState.showSpinPanel)
-        -- SpinWheelUI.Update(ClientState)
+        SpinWheelUI.Update(ClientState)
+        SnakeGameUI.Update(ClientState)
     end
 
     -- 抽奖相关回调
     SpinWheelUI.Callbacks.onClose = function()
         ClientState.showSpinPanel = false
-        -- 【临时禁用】SnakeGameUI.Update(ClientState)
+        SpinWheelUI.Update(ClientState)
+        SnakeGameUI.Update(ClientState)
     end
 
     SpinWheelUI.Callbacks.onSpin = function(callback)
@@ -338,10 +338,17 @@ function SnakeGameController:KnitStart()
     if SnakeGameService.SpinsChanged then
         SnakeGameService.SpinsChanged:Connect(function(spinsLeft)
             ClientState.spins = spinsLeft or 0
-            -- SpinWheelUI.Update(ClientState)
-            print("[SnakeGameController] 抽奖次数已更新: " .. tostring(ClientState.spins))
+            safeUiUpdate()
         end)
     end
+    -- 初始加载抽奖次数
+    task.spawn(function()
+        local ok, spins = pcall(function() return SnakeGameService:GetSpins() end)
+        if ok and spins then
+            ClientState.spins = spins
+            safeUiUpdate()
+        end
+    end)
     
     -- Kill All 信号（购买者触发，所有客户端清除被杀死蛇的 3D 尸体）
     if SnakeGameService.KillAll then
@@ -386,7 +393,7 @@ function SnakeGameController:KnitStart()
         -- 获取抽奖次数将通过 SpinsChanged 信号在线获取，初始为 0
         -- ClientState.spins 初始值已设为 0
 
-        for i = 1, 10 do
+        for i = 1, 20 do
             local success, state = pcall(function()
                 return SnakeGameService:GetGameState()
             end)
@@ -394,11 +401,20 @@ function SnakeGameController:KnitStart()
             if success and state and state.snakes then
                 print("[SnakeGameController] 获取初始状态成功 (第" .. i .. "次)")
 
-                -- 初始化所有蛇
+                -- 初始化所有蛇（传完整 body + color + displayLength，避免只显示头部）
                 for userId, s in pairs(state.snakes) do
                     if s.alive and s.body and #s.body > 0 then
-                        SnakeGame3DView.SpawnSnake(userId, s.body[1])
-                        SnakeGame3DView.UpdateSnakeDirection(userId, s.targetDirection or Vector3.new(0,0,0), s.isMoving or false)
+                        SnakeGame3DView.SpawnSnake(userId, s.body, s.color, s.displayLength)
+                        -- 同步方向/移动状态，使客户端预测立即生效
+                        SnakeGame3DView.UpdateSnakeData(userId, {
+                            dir          = s.direction,
+                            isMoving     = s.isMoving,
+                            score        = s.score,
+                            displayLength = s.displayLength,
+                            sizeMultiplier = s.sizeMultiplier,
+                            body         = s.body,
+                            playerName   = s.playerName,
+                        })
                     end
                 end
 
@@ -408,13 +424,13 @@ function SnakeGameController:KnitStart()
                     SnakeGame3DView.UpdateFood(state.food)
                 end
 
-                -- 初始化排行榜
+                -- 初始化排行榜（用 entry.length = displayLength，初始显示 2 而不是 0）
                 if state.leaderboard then
                     ClientState.leaderboard = state.leaderboard
                     local localNumId = Players.LocalPlayer.UserId
                     for _, entry in ipairs(state.leaderboard) do
                         if entry.userId == localNumId then
-                            lastScore = entry.score or 0
+                            lastScore = entry.length or entry.score or 0
                             ClientState.score = lastScore
                             break
                         end
@@ -438,8 +454,8 @@ function SnakeGameController:KnitStart()
                 SnakeGameUI.Update(ClientState)
                 break
             else
-                print("[SnakeGameController] 获取初始状态失败 (第" .. i .. "次)，1秒后重试...")
-                task.wait(1)
+                print("[SnakeGameController] 获取初始状态失败 (第" .. i .. "次)，0.2秒后重试...")
+                task.wait(0.2)   -- 从 1s 缩短到 0.2s，加快恢复速度
             end
         end
     end)

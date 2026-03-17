@@ -773,7 +773,19 @@ function SnakeGameUIRoot:render()
             LayoutOrder = 3, 
             onActivated = has2xSize and nil or SnakeGameUI.Callbacks.onPurchase2xSize
         }),
-        -- Button 4: Auto - Green/Red
+        -- Button 4: Spin - 转盘抽奖（显示剩余次数）
+        SpinBtn = actionBtn(
+            "Spin x" .. tostring(state.spins or 0),
+            Color3.fromRGB(255, 160, 0),
+            {
+                Name = "SpinButton",
+                Size = UDim2.new(0, 62, 0, 32),
+                TextSize = 11,
+                LayoutOrder = 4,
+                onActivated = SnakeGameUI.Callbacks.onToggleSpin
+            }
+        ),
+        -- Button 5: Auto - Green/Red
         AutoBtn = actionBtn(
             autoMode and "Stop" or "Auto",
             autoMode and Color3.fromRGB(220, 80, 80) or Color3.fromRGB(80, 220, 80),
@@ -781,7 +793,7 @@ function SnakeGameUIRoot:render()
                 Name = "AutoButton", 
                 Size = UDim2.new(0, 52, 0, 32),
                 TextSize = 11,
-                LayoutOrder = 4, 
+                LayoutOrder = 5, 
                 onActivated = SnakeGameUI.Callbacks.onAutoToggle 
             }
         ),

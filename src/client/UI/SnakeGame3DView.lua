@@ -63,6 +63,10 @@ local snakePositions = {}
 local localPlayerUserId = nil
 local otherSnakes = {}
 local frameCounter = 0  -- 用于控制诊断日志的频率
+
+-- 客户端食物预测：本地维护食物列表，Heartbeat 里预判吃取并立即隐藏
+local localFoodList = {}           -- 当前食物列表（由 UpdateFood 同步）
+local predictedEatenIds = {}       -- [foodId] = true，已预测吃掉等待服务端确认
 local labelAnchorParts = {} -- [userId] = Part (专属透明锚点Part，用于BillboardGui绑定)
 
 local function getKeys(t)
@@ -475,6 +479,22 @@ function SnakeGame3DView.Init()
                 
                 -- 完全由服务器驱动生长，本地不再预测
                 table.remove(localPlayerSnakeState.body)
+
+                -- 客户端食物预测：头进入拾取范围立即隐藏，消除"穿过食物没反应"的视觉延迟
+                local score = localPlayerSnakeState.displayLength or #localPlayerSnakeState.body
+                local bodySize = calculateBodySize(score) * (localPlayerSnakeState.sizeMultiplier or localSizeMultiplier or 1)
+                local pickupRange = 5.5 + bodySize * 0.8  -- 与服务端 pickupRange 保持一致
+                for _, f in ipairs(localFoodList) do
+                    if not predictedEatenIds[f.id] then
+                        if (newHead - f.pos).Magnitude < pickupRange then
+                            predictedEatenIds[f.id] = true
+                            local part = activeFoodParts[f.id]
+                            if part then
+                                part.Transparency = 1  -- 立即视觉隐藏，等服务端确认后正式移除
+                            end
+                        end
+                    end
+                end
             end
         end
 
@@ -1051,11 +1071,12 @@ function SnakeGame3DView.ApplyHeadSync(headData)
         local snake = isLocal and localPlayerSnakeState or otherSnakes[userId]
         if snake and snake.body and #snake.body > 0 and snap.h then
             if isLocal then
-                -- 本地玩家：极轻微 lerp 修正（5%），防止长期漂移导致食物位置不一致
-                -- 每次修正量 < 0.05 单位，肉眼不可见，不会引起镜头闪烁
+                -- 本地玩家：客户端预测为准，只在严重跑偏（>8 studs）时才修正
+                -- 正常网络延迟下偏差 1-3 studs 属于正常，不应被回拉（橡皮筋根源）
                 local diff = (snap.h - snake.body[1]).Magnitude
-                if diff > 0.5 then
-                    snake.body[1] = snake.body[1]:Lerp(snap.h, 0.05)
+                if diff > 8 then
+                    -- 大幅跑偏：快速收敛（30%），避免玩家感知到突然位移
+                    snake.body[1] = snake.body[1]:Lerp(snap.h, 0.3)
                 end
             else
                 -- 其他玩家/AI：直接用服务端坐标，消除漂移
@@ -1113,6 +1134,18 @@ end
 function SnakeGame3DView.UpdateFood(foodList)
     if not gameFolder then SnakeGame3DView.Init() end
 
+    -- 同步本地食物列表（供 Heartbeat 预测使用）
+    localFoodList = foodList
+
+    -- 清理已被服务端确认移除的预测记录
+    local serverIds = {}
+    for _, data in ipairs(foodList) do serverIds[data.id] = true end
+    for id in pairs(predictedEatenIds) do
+        if not serverIds[id] then
+            predictedEatenIds[id] = nil  -- 服务端已确认，清除预测标记
+        end
+    end
+
     local newActiveParts = {}
 
     for _, data in ipairs(foodList) do
@@ -1127,13 +1160,13 @@ function SnakeGame3DView.UpdateFood(foodList)
         elseif value == 10 then size = 2.4; color = Color3.fromRGB(200, 0, 255)
         elseif value == 9 then size = 2.3; color = Color3.fromRGB(100, 0, 255)
         elseif value == 8 then size = 2.1; color = Color3.fromRGB(0, 100, 255)
-        elseif value == 7 then size = 1.9; color = Color3.fromRGB(255, 0, 0) -- Level 7 now Red
-        elseif value == 6 then size = 1.7; color = Color3.fromRGB(0, 200, 255) -- Level 6 now Light Blue
+        elseif value == 7 then size = 1.9; color = Color3.fromRGB(255, 0, 0)
+        elseif value == 6 then size = 1.7; color = Color3.fromRGB(0, 200, 255)
         elseif value == 5 then size = 1.5; color = Color3.fromRGB(255, 100, 0)
         elseif value == 4 then size = 1.2; color = Color3.fromRGB(255, 200, 0)
         elseif value == 3 then size = 0.9; color = Color3.fromRGB(255, 255, 0)
-        elseif value == 2 then size = 0.7; color = Color3.fromRGB(255, 150, 200) -- Pink
-        else size = 1.2; color = Color3.fromRGB(255, 255, 255) -- White
+        elseif value == 2 then size = 0.7; color = Color3.fromRGB(255, 150, 200)
+        else size = 1.2; color = Color3.fromRGB(255, 255, 255)
         end
 
         if not part then
@@ -1144,6 +1177,12 @@ function SnakeGame3DView.UpdateFood(foodList)
         part.Position = data.pos
         part.Color = color
         part.Size = Vector3.new(size, size, size)
+
+        -- 恢复被错误预测（服务端未确认吃掉但依然存在）的食物的可见性
+        if not predictedEatenIds[id] then
+            part.Transparency = 0
+        end
+
         newActiveParts[id] = part
     end
 

@@ -30,6 +30,8 @@ function SnakeGameController:KnitStart()
         autoMode = false,
         giftData = { timePlayed = 0, claimed = {} }, -- 每日礼物数据
         showGiftPanel = false, -- 是否显示礼物面板
+        showSkinPanel = false,
+        skinData = { equippedSkinId = 1, ownedSkins = { 1 } },
         spins = 0, -- 抽奖次数
         showSpinPanel = false, -- 是否显示抽奖面板
         speedMultiplier = 1, -- 1 或 2，Robux 购买的 2x 速度
@@ -81,6 +83,24 @@ function SnakeGameController:KnitStart()
         ClientState.showSpinPanel = not ClientState.showSpinPanel
         SpinWheelUI.Update(ClientState)
         requestUiUpdate(true)
+    end
+
+    SnakeGameUI.Callbacks.onToggleSkin = function()
+        ClientState.showSkinPanel = not ClientState.showSkinPanel
+        requestUiUpdate(true)
+    end
+
+    SnakeGameUI.Callbacks.onSelectSkin = function(skinId)
+        if not SnakeGameService then return end
+        task.spawn(function()
+            local ok, success, result = pcall(function()
+                return SnakeGameService:PurchaseOrEquipSkin(skinId)
+            end)
+            if ok and success and result then
+                ClientState.skinData = result
+                requestUiUpdate(true)
+            end
+        end)
     end
 
     -- 抽奖相关回调
@@ -264,10 +284,9 @@ function SnakeGameController:KnitStart()
                 SnakeGame3DView.UpdateSnakeData(ukey, syncData)
                 
                 if ukey == localId then
-                    -- 显示 displayLength（蛇身实际长度，初始为 INITIAL_LENGTH=2）而非 food score（从0开始）
-                    local displayLen = entry.length or score
-                    lastScore = displayLen
-                    ClientState.score = displayLen
+                    local boardScore = entry.score or entry.length or 0
+                    lastScore = boardScore
+                    ClientState.score = boardScore
                 end
             end
 
@@ -416,7 +435,7 @@ function SnakeGameController:KnitStart()
             local localNumId = Players.LocalPlayer.UserId
             for _, entry in ipairs(state.leaderboard) do
                 if entry.userId == localNumId then
-                    lastScore = entry.length or entry.score or 0
+                    lastScore = entry.score or entry.length or 0
                     ClientState.score = lastScore
                     break
                 end
@@ -431,6 +450,9 @@ function SnakeGameController:KnitStart()
         end
         if snapshot.money ~= nil then
             ClientState.money = snapshot.money
+        end
+        if snapshot.skinData then
+            ClientState.skinData = snapshot.skinData
         end
         if snapshot.speedMultiplier and snapshot.speedMultiplier >= 2 then
             ClientState.speedMultiplier = 2
@@ -469,6 +491,12 @@ function SnakeGameController:KnitStart()
         if successGift and giftData then
             ClientState.giftData = giftData
         end
+        local successSkin, skinData = pcall(function()
+            return SnakeGameService:GetSkinData()
+        end)
+        if successSkin and skinData then
+            ClientState.skinData = skinData
+        end
 
         for i = 1, 20 do
             local success, state = pcall(function()
@@ -503,7 +531,7 @@ function SnakeGameController:KnitStart()
                     local localNumId = Players.LocalPlayer.UserId
                     for _, entry in ipairs(state.leaderboard) do
                         if entry.userId == localNumId then
-                            lastScore = entry.length or entry.score or 0
+                            lastScore = entry.score or entry.length or 0
                             ClientState.score = lastScore
                             break
                         end

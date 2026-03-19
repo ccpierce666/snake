@@ -114,6 +114,12 @@ end
 function SnakeGameService:ClaimGift(index)
 end
 
+function SnakeGameService:GetSkinData()
+end
+
+function SnakeGameService:PurchaseOrEquipSkin(skinId)
+end
+
 function SnakeGameService:KnitStart()
     print("[Client SnakeGameService] KnitStart")
 end

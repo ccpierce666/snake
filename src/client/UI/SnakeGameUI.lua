@@ -32,6 +32,20 @@ local GIFT_REWARDS = {
     { time = 4200, type = "Length", amount = 250000 },   -- 70:00  格11
     { time = 5400, type = "Length", amount = 1000000 },  -- 90:00  格12
 }
+local SKIN_ITEMS = {
+    { id = 1, price = 0, color = Color3.fromRGB(255, 210, 60), name = "Classic" },
+    { id = 2, price = 5000, color = Color3.fromRGB(240, 240, 240), name = "Ivory" },
+    { id = 3, price = 10000, color = Color3.fromRGB(80, 160, 255), name = "Azure" },
+    { id = 4, price = 25000, color = Color3.fromRGB(255, 140, 40), name = "Orange" },
+    { id = 5, price = 50000, color = Color3.fromRGB(255, 70, 70), name = "Crimson" },
+    { id = 6, price = 80000, color = Color3.fromRGB(180, 90, 255), name = "Violet" },
+    { id = 7, price = 120000, color = Color3.fromRGB(30, 30, 30), name = "Shadow" },
+    { id = 8, price = 180000, color = Color3.fromRGB(30, 190, 120), name = "Emerald" },
+    { id = 9, price = 260000, color = Color3.fromRGB(160, 160, 160), name = "Monochrome" },
+    { id = 10, price = 320000, color = Color3.fromRGB(255, 85, 20), name = "Magma" },
+    { id = 11, price = 380000, color = Color3.fromRGB(40, 165, 255), name = "Ripple" },
+    { id = 12, price = 450000, color = Color3.fromRGB(130, 95, 45), name = "Cobra" },
+}
 
 local function el(className, props, children)
     return Roact.createElement(className, props or {}, children or {})
@@ -111,11 +125,12 @@ local function menuBtn(label, bgColor, props)
     }
 
     if props.Icon then
+        local iconSize = props.IconSize or 26
         children.IconImage = el("ImageLabel", {
             BackgroundTransparency = 1,
             Position = UDim2.new(0.5, 0, 0.5, 0),
             AnchorPoint = Vector2.new(0.5, 0.5),
-            Size = UDim2.new(0, 26, 0, 26),
+            Size = UDim2.new(0, iconSize, 0, iconSize),
             Image = props.Icon,
             ImageColor3 = Color3.new(1, 1, 1),
         })
@@ -625,6 +640,133 @@ local function GiftPanel(props)
     })
 end
 
+local function SkinPanel(props)
+    local onClose = props.onClose
+    local onSelect = props.onSelect
+    local skinData = props.skinData or {}
+    local equippedSkinId = tonumber(skinData.equippedSkinId) or 1
+    local ownedMap = {}
+    for _, id in ipairs(skinData.ownedSkins or {}) do
+        ownedMap[tonumber(id)] = true
+    end
+    ownedMap[1] = true
+
+    local gridChildren = {}
+    for _, item in ipairs(SKIN_ITEMS) do
+        local isEquipped = equippedSkinId == item.id
+        local isOwned = ownedMap[item.id] == true
+        local label = isEquipped and "EQUIP" or (isOwned and "USE" or ("$" .. formatNumber(item.price)))
+        local statusColor = isEquipped and Color3.fromRGB(70, 220, 70) or Color3.fromRGB(60, 160, 255)
+        gridChildren["Skin" .. item.id] = el("TextButton", {
+            BackgroundColor3 = item.color,
+            BorderSizePixel = 0,
+            LayoutOrder = item.id,
+            AutoButtonColor = true,
+            Text = "",
+            [Roact.Event.Activated] = function()
+                if onSelect then
+                    onSelect(item.id)
+                end
+            end,
+        }, {
+            UICorner = el("UICorner", { CornerRadius = UDim.new(0, 6) }),
+            UIStroke = el("UIStroke", { Thickness = 2, Color = Color3.new(0, 0, 0) }),
+            Name = el("TextLabel", {
+                Size = UDim2.new(0.9, 0, 0, 12),
+                Position = UDim2.new(0.5, 0, 0, 2),
+                AnchorPoint = Vector2.new(0.5, 0),
+                BackgroundTransparency = 1,
+                Text = item.name or ("Skin " .. tostring(item.id)),
+                Font = Enum.Font.FredokaOne,
+                TextSize = 8,
+                TextColor3 = Color3.new(1, 1, 1),
+                TextStrokeTransparency = 0.35,
+                TextStrokeColor3 = Color3.new(0, 0, 0),
+            }),
+            Status = el("TextLabel", {
+                Size = UDim2.new(0.88, 0, 0, 16),
+                Position = UDim2.new(0.5, 0, 1, -4),
+                AnchorPoint = Vector2.new(0.5, 1),
+                BackgroundColor3 = statusColor,
+                BorderSizePixel = 0,
+                Text = label,
+                Font = Enum.Font.FredokaOne,
+                TextSize = 10,
+                TextColor3 = Color3.new(1, 1, 1),
+                TextStrokeTransparency = 0.35,
+                TextStrokeColor3 = Color3.new(0, 0, 0),
+            }, {
+                UICorner = el("UICorner", { CornerRadius = UDim.new(0, 3) }),
+                UIStroke = el("UIStroke", { Thickness = 1, Color = Color3.new(0, 0, 0) }),
+            }),
+        })
+    end
+    gridChildren.Layout = el("UIGridLayout", {
+        CellSize = UDim2.new(0, 64, 0, 52),
+        CellPadding = UDim2.new(0, 4, 0, 6),
+        SortOrder = Enum.SortOrder.LayoutOrder,
+        HorizontalAlignment = Enum.HorizontalAlignment.Left,
+        VerticalAlignment = Enum.VerticalAlignment.Top,
+    })
+
+    return Roui.Overlay({
+        OnClose = onClose,
+        Transparency = 1,
+    }, {
+        Panel = el("Frame", {
+            Size = UDim2.new(0, 300, 0, 232),
+            Position = UDim2.new(0.5, 0, 0.38, 0),
+            AnchorPoint = Vector2.new(0.5, 0.5),
+            BackgroundColor3 = Color3.fromRGB(60, 180, 255),
+            ZIndex = 101,
+        }, {
+            UICorner = el("UICorner", { CornerRadius = UDim.new(0, 10) }),
+            UIStroke = el("UIStroke", { Thickness = 2, Color = Color3.new(0, 0, 0) }),
+            Title = el("TextLabel", {
+                Size = UDim2.new(1, -40, 0, 30),
+                Position = UDim2.new(0, 10, 0, 4),
+                BackgroundTransparency = 1,
+                Text = "SKINS",
+                Font = Enum.Font.FredokaOne,
+                TextSize = 22,
+                TextColor3 = Color3.new(1, 1, 1),
+                TextStrokeTransparency = 0.25,
+                TextStrokeColor3 = Color3.new(0, 0, 0),
+                TextXAlignment = Enum.TextXAlignment.Left,
+            }),
+            CloseBtn = el("TextButton", {
+                Text = "X",
+                Size = UDim2.new(0, 24, 0, 24),
+                Position = UDim2.new(1, -8, 0, 8),
+                AnchorPoint = Vector2.new(1, 0),
+                BackgroundColor3 = Color3.fromRGB(220, 60, 60),
+                BorderSizePixel = 0,
+                Font = Enum.Font.FredokaOne,
+                TextSize = 14,
+                TextColor3 = Color3.new(1, 1, 1),
+                [Roact.Event.Activated] = onClose,
+            }, {
+                UICorner = el("UICorner", { CornerRadius = UDim.new(0, 4) }),
+                UIStroke = el("UIStroke", { Thickness = 1, Color = Color3.new(0, 0, 0) }),
+            }),
+            Grid = el("Frame", {
+                Size = UDim2.new(1, -16, 1, -44),
+                Position = UDim2.new(0, 8, 0, 36),
+                BackgroundColor3 = Color3.fromRGB(40, 120, 200),
+                BorderSizePixel = 0,
+            }, {
+                UICorner = el("UICorner", { CornerRadius = UDim.new(0, 8) }),
+                UIStroke = el("UIStroke", { Thickness = 1, Color = Color3.new(0, 0, 0) }),
+                Items = el("Frame", {
+                    Size = UDim2.new(1, -6, 1, -6),
+                    Position = UDim2.new(0, 3, 0, 3),
+                    BackgroundTransparency = 1,
+                }, gridChildren),
+            }),
+        }),
+    })
+end
+
 local SnakeGameUIRoot = Roact.Component:extend("SnakeGameUIRoot")
 
 function SnakeGameUIRoot:render()
@@ -634,6 +776,7 @@ function SnakeGameUIRoot:render()
     local score = state.score or (mySnake and mySnake.score) or 0
     local money = state.money or 0
     local giftData = state.giftData or { timePlayed = 0, claimed = {} }
+    local skinData = state.skinData or { equippedSkinId = 1, ownedSkins = { 1 } }
     local autoMode = state.autoMode or false
     local speedMultiplier = state.speedMultiplier or 1
     local has2xSpeed = speedMultiplier >= 2
@@ -688,13 +831,29 @@ function SnakeGameUIRoot:render()
             }),
         }),
 
-        -- Menu Buttons Grid (hidden)
+        -- Menu Buttons Grid
         MenuGrid = el("Frame", {
-            Size = UDim2.new(0, 0, 0, 0),
+            Size = UDim2.new(0, 160, 0, 150),
             BackgroundTransparency = 1,
-            Visible = false,
             LayoutOrder = 2,
-        }, {}),
+        }, {
+            UIGridLayout = el("UIGridLayout", {
+                CellSize = UDim2.new(0, 70, 0, 70),
+                CellPadding = UDim2.new(0, 10, 0, 10),
+                SortOrder = Enum.SortOrder.LayoutOrder,
+            }),
+            SkinBtn = menuBtn("", Color3.fromRGB(228, 139, 68), {
+                Name = "SkinButton",
+                Size = UDim2.new(0, 26, 0, 26),
+                IconSize = 22,
+                Icon = "rbxassetid://94001317361506",
+                onActivated = SnakeGameUI.Callbacks.onToggleSkin,
+                LayoutOrder = 3,
+                Children = {
+                    UICorner = el("UICorner", { CornerRadius = UDim.new(0, 2) }),
+                },
+            }),
+        }),
     })
 
     -- 右侧栏：排行榜 + Gift 按钮，垂直堆叠
@@ -773,19 +932,6 @@ function SnakeGameUIRoot:render()
             LayoutOrder = 3, 
             onActivated = has2xSize and nil or SnakeGameUI.Callbacks.onPurchase2xSize
         }),
-        -- Button 4: Spin - 转盘抽奖（显示剩余次数）
-        SpinBtn = actionBtn(
-            "Spin x" .. tostring(state.spins or 0),
-            Color3.fromRGB(255, 160, 0),
-            {
-                Name = "SpinButton",
-                Size = UDim2.new(0, 62, 0, 32),
-                TextSize = 11,
-                LayoutOrder = 4,
-                onActivated = SnakeGameUI.Callbacks.onToggleSpin
-            }
-        ),
-        -- Button 5: Auto - Green/Red
         AutoBtn = actionBtn(
             autoMode and "Stop" or "Auto",
             autoMode and Color3.fromRGB(220, 80, 80) or Color3.fromRGB(80, 220, 80),
@@ -793,7 +939,7 @@ function SnakeGameUIRoot:render()
                 Name = "AutoButton", 
                 Size = UDim2.new(0, 52, 0, 32),
                 TextSize = 11,
-                LayoutOrder = 5, 
+                LayoutOrder = 4,
                 onActivated = SnakeGameUI.Callbacks.onAutoToggle 
             }
         ),
@@ -804,6 +950,14 @@ function SnakeGameUIRoot:render()
             giftData = giftData,
             onClose = SnakeGameUI.Callbacks.onToggleGiftPanel,
             onClaim = SnakeGameUI.Callbacks.onClaimGift,
+        })
+    end
+
+    if state.showSkinPanel then
+        children.SkinPanel = Roact.createElement(SkinPanel, {
+            skinData = skinData,
+            onClose = SnakeGameUI.Callbacks.onToggleSkin,
+            onSelect = SnakeGameUI.Callbacks.onSelectSkin,
         })
     end
 
@@ -823,8 +977,10 @@ function SnakeGameUIRoot:render()
     -- DeathPanel / GiftPanel 留在根层，从 (0,0) 全屏覆盖
     local deathPanel  = children.DeathPanel
     local giftPanel   = children.GiftPanel
+    local skinPanel   = children.SkinPanel
     children.DeathPanel = nil
     children.GiftPanel  = nil
+    children.SkinPanel  = nil
 
     local rootChildren = {
         SafeArea = el("Frame", {
@@ -836,6 +992,7 @@ function SnakeGameUIRoot:render()
     }
     if deathPanel then rootChildren.DeathPanel = deathPanel end
     if giftPanel  then rootChildren.GiftPanel  = giftPanel  end
+    if skinPanel  then rootChildren.SkinPanel  = skinPanel  end
 
     return el("Frame", {
         Name = "SnakeGameUI",

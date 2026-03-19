@@ -20,6 +20,7 @@ local giftStore = DataStoreService:GetDataStore("SnakeGameGifts_v1")
 local spinStore = DataStoreService:GetDataStore("SnakeGameSpins_v1")
 local speedStore = DataStoreService:GetDataStore("SnakeGameSpeed_v1")
 local sizeStore = DataStoreService:GetDataStore("SnakeGameSize_v1")
+local skinStore = DataStoreService:GetDataStore("SnakeGameSkins_v1")
 
 -- Developer Product: 2x Speed (Robux 购买)
 local PRODUCT_ID_2X_SPEED = 3552817506
@@ -81,6 +82,8 @@ local playerSpins = {}
 local playerDailyGifts = {}
 local playerFoodCounts = {} -- 用于记录吃食物数量
 local playerSkinColors = {} -- [userId] = Color3，玩家专属初始颜色
+local playerOwnedSkins = {}
+local playerEquippedSkinId = {}
 local playerSpeedMultiplier = {} -- [uid] = 1 或 2，Robux 购买的 2x 速度
 local playerSizeMultiplier = {} -- [uid] = 1 或 2，Robux 购买的 2x 体型
 local playerPendingRevive = {} -- [uid] = lostSize，死亡时暂存，购买 Revive 后恢复
@@ -109,6 +112,24 @@ local SKIN_COLOR_POOL = {
     Color3.fromRGB(255, 140, 40),  -- 橙
     Color3.fromRGB(255, 70, 70),   -- 红
 }
+local SKIN_SHOP = {
+    { id = 1, price = 0, color = Color3.fromRGB(255, 210, 60) },
+    { id = 2, price = 5000, color = Color3.fromRGB(240, 240, 240) },
+    { id = 3, price = 10000, color = Color3.fromRGB(80, 160, 255) },
+    { id = 4, price = 25000, color = Color3.fromRGB(255, 140, 40) },
+    { id = 5, price = 50000, color = Color3.fromRGB(255, 70, 70) },
+    { id = 6, price = 80000, color = Color3.fromRGB(180, 90, 255) },
+    { id = 7, price = 120000, color = Color3.fromRGB(30, 30, 30) },
+    { id = 8, price = 180000, color = Color3.fromRGB(30, 190, 120) },
+    { id = 9, price = 260000, color = Color3.fromRGB(160, 160, 160) },
+    { id = 10, price = 320000, color = Color3.fromRGB(255, 85, 20) },
+    { id = 11, price = 380000, color = Color3.fromRGB(40, 165, 255) },
+    { id = 12, price = 450000, color = Color3.fromRGB(130, 95, 45) },
+}
+local SKIN_SHOP_BY_ID = {}
+for _, item in ipairs(SKIN_SHOP) do
+    SKIN_SHOP_BY_ID[item.id] = item
+end
 local skinColorIndex = 0
 
 -- 统一 key 格式：所有内存表一律用 "u" + userId，避免 Lua 将纯数字字符串误判为整数 key
@@ -118,6 +139,12 @@ local function uidNum(key) return tonumber(string.sub(tostring(key), 2)) end
 
 local function assignSkinColor(userId)
     local key = uid(userId)
+    local equippedId = playerEquippedSkinId[key]
+    local equipped = equippedId and SKIN_SHOP_BY_ID[equippedId]
+    if equipped then
+        playerSkinColors[key] = equipped.color
+        return playerSkinColors[key]
+    end
     if not playerSkinColors[key] then
         skinColorIndex = (skinColorIndex % #SKIN_COLOR_POOL) + 1
         playerSkinColors[key] = SKIN_COLOR_POOL[skinColorIndex]
@@ -207,6 +234,17 @@ local function calculateVisualBodySize(score)
     end
 end
 
+local function calculateTargetSegments(score)
+    if score < 300 then
+        return 2 + math.floor(score / 50)
+    elseif score < 1000 then
+        return 8 + math.floor((score - 300) / 100)
+    elseif score < 2000 then
+        return 15 + math.floor((score - 1000) / 200)
+    end
+    return 20 + math.floor((score - 2000) / 300)
+end
+
 local function getGrowthMultiplier(score)
     if score < 10000 then return 1.00 + (score / 10000) * 0.06
     elseif score < 100000 then return 1.06 + ((score - 10000) / 90000) * 0.27
@@ -281,40 +319,70 @@ local function saveSizeMultiplier(userId)
     end
 end
 
+local function loadSkinData(userId)
+    local owned = { [1] = true }
+    local equipped = 1
+    local success, saved = pcall(function()
+        return skinStore:GetAsync("skin_" .. tostring(userId))
+    end)
+    if success and type(saved) == "table" then
+        if type(saved.owned) == "table" then
+            for _, id in ipairs(saved.owned) do
+                id = tonumber(id)
+                if id and SKIN_SHOP_BY_ID[id] then
+                    owned[id] = true
+                end
+            end
+        end
+        local target = tonumber(saved.equipped) or 1
+        if owned[target] and SKIN_SHOP_BY_ID[target] then
+            equipped = target
+        end
+    end
+    return owned, equipped
+end
+
+local function saveSkinData(userId)
+    local key = uid(userId)
+    local owned = playerOwnedSkins[key]
+    if not owned then return end
+    local ownedList = {}
+    for id, has in pairs(owned) do
+        if has then
+            table.insert(ownedList, id)
+        end
+    end
+    table.sort(ownedList, function(a, b) return a < b end)
+    pcall(function()
+        skinStore:SetAsync("skin_" .. tostring(userId), {
+            owned = ownedList,
+            equipped = playerEquippedSkinId[key] or 1,
+        })
+    end)
+end
+
 -------------------------------------------------------------------------------
 -- Service 核心方法
 -------------------------------------------------------------------------------
 
 function SnakeGameService:AddSnakeLength(userId, amount)
-    local s = snakes[uid(userId)]
+    local key = uid(userId)
+    local s = snakes[key]
     if not s or not s.alive then return end
 
     s.score = (s.score or 0) + amount
-    s.displayLength = (s.displayLength or #s.body) + amount
     
     -- 核心修复：直接根据目标长度来决定是否生长，不再依赖 cost 累积
     -- 目标是：在 X 分数时，应该有 Y 个视觉节
     -- 1 个视觉节需要的物理长度 = visualSize * 0.6
     -- 1 个物理帧提供的长度 = SNAKE_SPEED * GAME_TICK = 0.25
     
-    local visualSize = calculateVisualBodySize(s.score) * (playerSizeMultiplier[uid(userId)] or 1)
+    local visualSize = calculateVisualBodySize(s.score) * (playerSizeMultiplier[key] or 1)
     local spacing = visualSize * 0.6
     
     -- 计算目标节数 (Target Visual Segments)
-    local targetSegments = 2
-    if s.score < 300 then
-        -- 0-300: 2 -> 8 (每50分长一节)
-        targetSegments = 2 + math.floor(s.score / 50)
-    elseif s.score < 1000 then
-        -- 300-1000: 8 -> 15 (每100分长一节)
-        targetSegments = 8 + math.floor((s.score - 300) / 100)
-    elseif s.score < 2000 then
-        -- 1000-2000: 15 -> 20 (每200分长一节)
-        targetSegments = 15 + math.floor((s.score - 1000) / 200)
-    else
-        -- 2000+: 每300分长一节
-        targetSegments = 20 + math.floor((s.score - 2000) / 300)
-    end
+    local targetSegments = calculateTargetSegments(s.score)
+    s.displayLength = targetSegments
     
     -- 计算目标物理帧数 (Target Physical Frames)
     -- 总物理长度 = 目标节数 * 间距
@@ -510,6 +578,8 @@ function SnakeGameService.Client:Spin(player) return self.Server:Spin(player) en
 function SnakeGameService.Client:GetSpins(player) return playerSpins[uid(player.UserId)] or 0 end
 function SnakeGameService.Client:GetGameState(p) return self.Server:GetGameState() end
 function SnakeGameService.Client:SubscribeRealtime(p) return self.Server:SubscribeRealtime(p) end
+function SnakeGameService.Client:GetSkinData(p) return self.Server:GetSkinData(p) end
+function SnakeGameService.Client:PurchaseOrEquipSkin(p, skinId) return self.Server:PurchaseOrEquipSkin(p, skinId) end
 function SnakeGameService.Client:ChangeDirection(p, d, headPos) self.Server:ChangeDirection(p, d, headPos) end
 function SnakeGameService.Client:SyncPosition(p, headPos) self.Server:SyncPosition(p, headPos) end
 function SnakeGameService.Client:RequestRespawn(p) self.Server:RequestRespawn(p) end
@@ -518,19 +588,10 @@ function SnakeGameService:RequestRevive(player, lostSize)
     local score = math.max(INITIAL_LENGTH, tonumber(lostSize) or 0)
     local sizeMult = playerSizeMultiplier[uid(player.UserId)] or 1
 
-    -- 按 score 计算目标视觉节数（与 AddSnakeLength 同一套公式）
-    local function calcTargetSegments(sc)
-        if sc < 300      then return 2 + math.floor(sc / 50)
-        elseif sc < 1000 then return 8  + math.floor((sc - 300)  / 100)
-        elseif sc < 2000 then return 15 + math.floor((sc - 1000) / 200)
-        else                  return 20 + math.floor((sc - 2000) / 300)
-        end
-    end
-
     local visualSize    = calculateVisualBodySize(score) * sizeMult
     local spacing       = visualSize * 0.6
     local speedPerFrame = SNAKE_SPEED * GAME_TICK   -- 0.25
-    local targetSegs    = calcTargetSegments(score)
+    local targetSegs    = calculateTargetSegments(score)
     local targetFrames  = math.ceil((targetSegs * spacing) / speedPerFrame)
     targetFrames = math.max(targetFrames, INITIAL_LENGTH)
 
@@ -550,10 +611,10 @@ function SnakeGameService:RequestRevive(player, lostSize)
         alive              = true,
         growthPending      = 0,
         pendingGrowthScore = 0,
-        displayLength      = score,
+        displayLength      = targetSegs,
     }
 
-    SnakeSpawnedSignal:Fire(player.UserId, body, assignSkinColor(player.UserId), score)
+    SnakeSpawnedSignal:Fire(player.UserId, body, assignSkinColor(player.UserId), targetSegs)
     markLeaderboardDirty()
     pushLeaderboardState(true)
     StateSnapshotSignal:FireTo(player, buildRealtimeSnapshot(player))
@@ -569,6 +630,57 @@ function SnakeGameService.Client:GetSizeMultiplier(p)
 end
 function SnakeGameService.Client:RequestPurchase2xSize(p) self.Server:RequestPurchase2xSize(p) end
 function SnakeGameService.Client:RequestPurchaseKillAll(p) self.Server:RequestPurchaseKillAll(p) end
+
+local function buildSkinData(userId)
+    local key = uid(userId)
+    local owned = playerOwnedSkins[key] or { [1] = true }
+    local ownedList = {}
+    for _, item in ipairs(SKIN_SHOP) do
+        if owned[item.id] then
+            table.insert(ownedList, item.id)
+        end
+    end
+    return {
+        equippedSkinId = playerEquippedSkinId[key] or 1,
+        ownedSkins = ownedList,
+    }
+end
+
+function SnakeGameService:GetSkinData(player)
+    return buildSkinData(player.UserId)
+end
+
+function SnakeGameService:PurchaseOrEquipSkin(player, skinId)
+    local id = tonumber(skinId)
+    local item = id and SKIN_SHOP_BY_ID[id]
+    if not item then
+        return false, "Invalid skin"
+    end
+    local key = uid(player.UserId)
+    local owned = playerOwnedSkins[key] or { [1] = true }
+    playerOwnedSkins[key] = owned
+    if not owned[id] then
+        local currentMoney = playerMoney[key]
+        if currentMoney == nil then
+            currentMoney = loadMoney(player.UserId)
+            playerMoney[key] = currentMoney
+        end
+        if currentMoney < item.price then
+            return false, "Not enough money"
+        end
+        playerMoney[key] = currentMoney - item.price
+        owned[id] = true
+        saveMoney(player.UserId)
+        MoneyChangedSignal:FireTo(player, playerMoney[key])
+    end
+    playerEquippedSkinId[key] = id
+    playerSkinColors[key] = item.color
+    saveSkinData(player.UserId)
+    markLeaderboardDirty()
+    pushLeaderboardState(true)
+    StateSnapshotSignal:FireTo(player, buildRealtimeSnapshot(player))
+    return true, buildSkinData(player.UserId)
+end
 
 -- 注意：本项目的 Knit 实现会为 Service 上的公开方法创建 RemoteFunction（Call_Service_Method）。
 -- 因此需要提供同名的 Service 方法供客户端 InvokeServer 调用。
@@ -762,6 +874,7 @@ buildRealtimeSnapshot = function(player)
         speedMultiplier = playerSpeedMultiplier[key] or 1,
         sizeMultiplier = playerSizeMultiplier[key] or 1,
         money = playerMoney[key] or loadMoney(player.UserId),
+        skinData = buildSkinData(player.UserId),
     }
 end
 
@@ -981,7 +1094,8 @@ local function moveSnakes()
                 local growth = FOOD_GROWTH_MAP[f.value or 1] or 2
                 SnakeGameService:AddSnakeLength(uidNum(k), growth)
                 if not s.isAI then
-                    playerMoney[k] = (playerMoney[k] or 0) + 1
+                    local moneyGain = math.max(2, (f.value or 1) * 2)
+                    playerMoney[k] = (playerMoney[k] or 0) + moneyGain
                     local pid = uidNum(k)
                     local p = (pid and pid > 0) and Players:GetPlayerByUserId(pid) or nil
                     if p then MoneyChangedSignal:FireTo(p, playerMoney[k]) end
@@ -1113,7 +1227,8 @@ local function moveSnakes_UNUSED()
                     
                     -- 每吃 1 个食物获得 1 金钱 (1:1)（AI 不累计金钱）
                     if not s.isAI then
-                        playerMoney[k] = (playerMoney[k] or 0) + 1
+                        local moneyGain = math.max(2, (f.value or 1) * 2)
+                        playerMoney[k] = (playerMoney[k] or 0) + moneyGain
                         local pid = uidNum(k)
                         local p = (pid and pid > 0) and Players:GetPlayerByUserId(pid) or nil
                         if p then MoneyChangedSignal:FireTo(p, playerMoney[k]) end
@@ -1486,6 +1601,13 @@ function SnakeGameService:KnitInit()
         playerFoodCounts[key] = 0
         playerSpeedMultiplier[key] = loadSpeedMultiplier(p.UserId)
         playerSizeMultiplier[key] = loadSizeMultiplier(p.UserId)
+        local ownedSkins, equippedSkinId = loadSkinData(p.UserId)
+        playerOwnedSkins[key] = ownedSkins
+        playerEquippedSkinId[key] = equippedSkinId
+        local equipped = SKIN_SHOP_BY_ID[equippedSkinId]
+        if equipped then
+            playerSkinColors[key] = equipped.color
+        end
 
         -- 稍等客户端 Knit 完成信号绑定后再生成蛇，避免 SnakeSpawnedSignal 比客户端先到
         task.delay(0.5, function()
@@ -1506,10 +1628,13 @@ function SnakeGameService:KnitInit()
         saveMoney(p.UserId)
         saveSpeedMultiplier(p.UserId)
         saveSizeMultiplier(p.UserId)
+        saveSkinData(p.UserId)
         local key = uid(p.UserId)
         playerMoney[key] = nil
         playerFoodCounts[key] = nil
         playerDailyGifts[key] = nil
+        playerOwnedSkins[key] = nil
+        playerEquippedSkinId[key] = nil
         playerSpeedMultiplier[key] = nil
         playerSizeMultiplier[key] = nil
         playerSkinColors[key] = nil

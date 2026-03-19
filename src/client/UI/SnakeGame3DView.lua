@@ -49,6 +49,11 @@ local FOOD_COLORS = {
 local SNAKE_SPEED = 15
 local GAME_TICK = 1/60
 local RING_RADIUS = 5.5
+local MOBILE_FOOD_RENDER_LIMIT = 260
+local MOBILE_FOOD_NEAR_RADIUS = 120
+local MOBILE_SNAKE_POINT_LIMIT = 180
+local OTHER_SNAKE_MAX_TELEPORT_DIST = 30
+local OTHER_SNAKE_PREDICT_WINDOW = 0.35
 local speedMultiplier = 1  -- 1 或 2，Robux 购买的 2x 速度
 local localSizeMultiplier = 1 -- 1 或 2，Robux 购买的 2x 体型（仅本地蛇预测/圈）
 
@@ -465,7 +470,8 @@ function SnakeGame3DView.Init()
     end
 
     -- 渲染循环 (Heartbeat)
-    RunService.Heartbeat:Connect(function()
+    RunService.Heartbeat:Connect(function(dt)
+        dt = dt or GAME_TICK
         -- 1. 更新本地预测
         if localPlayerSnakeState and localPlayerSnakeState.isMoving and #localPlayerSnakeState.body > 0 then
             local head = localPlayerSnakeState.body[1]
@@ -498,14 +504,31 @@ function SnakeGame3DView.Init()
             end
         end
 
-        -- 更新其他玩家的蛇位置
         for _, s in pairs(otherSnakes) do
-            if s.alive and s.isMoving and s.targetDirection.Magnitude > 0.1 then
-                s.direction = s.targetDirection
+            if s and s.body and #s.body > 0 then
                 local head = s.body[1]
-                local newHead = head + s.direction * SNAKE_SPEED * GAME_TICK
-                table.insert(s.body, 1, newHead)
-                table.remove(s.body)
+                local velocity = s.serverVelocity
+                local predicted = head
+                local age = s.lastServerAt and (os.clock() - s.lastServerAt) or math.huge
+                if velocity and velocity.Magnitude > 0.01 and age <= OTHER_SNAKE_PREDICT_WINDOW then
+                    predicted = head + velocity * dt
+                end
+
+                local target = s.lastServerHead
+                if target then
+                    local error = target - predicted
+                    local errDist = error.Magnitude
+                    if errDist > 0.001 then
+                        local alpha = math.clamp(dt * 8, 0.08, 0.35)
+                        predicted = predicted + error * alpha
+                    end
+                end
+
+                local moveDist = (predicted - head).Magnitude
+                if moveDist > 0.001 then
+                    table.insert(s.body, 1, predicted)
+                    table.remove(s.body)
+                end
             end
         end
 
@@ -539,6 +562,7 @@ function SnakeGame3DView.Init()
         -- 2. 渲染蛇
         snakePositions = {}
         local snakeHeads = {} -- [snakePositions index] = userId (for name label positioning)
+        local maxSnakePoints = isMobile and MOBILE_SNAKE_POINT_LIMIT or math.huge
 
         local function addSnakeRenderPoints(body, isLocal, bodySize, userId, snakeColor)
             if not body or #body == 0 then return end
@@ -557,10 +581,12 @@ function SnakeGame3DView.Init()
                 bodySize = bodySize,
             })
             table.insert(snakeHeads, userId)
+            if #snakePositions >= maxSnakePoints then return end
 
             local accumulatedDist = 0
 
             for i = 2, #body do
+                if #snakePositions >= maxSnakePoints then break end
                 local p1 = body[i-1]
                 local p2 = body[i]
                 local vec = p2 - p1
@@ -568,6 +594,10 @@ function SnakeGame3DView.Init()
                 accumulatedDist = accumulatedDist + segmentDist
 
                 while accumulatedDist >= spacing do
+                    if #snakePositions >= maxSnakePoints then
+                        accumulatedDist = 0
+                        break
+                    end
                     accumulatedDist = accumulatedDist - spacing
                     local dir = vec.Unit
                     local pos = p2 - dir * accumulatedDist
@@ -676,7 +706,7 @@ function SnakeGame3DView.Init()
             end
             if localLabel then
                 -- 使用 ClientState 中的分数（统一数据源）
-                local score = (clientStateRef and clientStateRef.score) or (localPlayerSnakeState.logicalLength or #localPlayerSnakeState.body)
+                local score = (clientStateRef and clientStateRef.score) or localPlayerSnakeState.displayLength or #localPlayerSnakeState.body
                 local displayLength = localPlayerSnakeState.displayLength or #localPlayerSnakeState.body
                 
                 -- 用专属锚点Part绑定，每帧更新锚点位置到蛇头坐标
@@ -731,7 +761,7 @@ function SnakeGame3DView.Init()
             if userId ~= uid(Players.LocalPlayer.UserId) then
                 if otherSnakes[userId] and otherSnakes[userId].body and #otherSnakes[userId].body > 0 then
                     if label then
-                        local score = otherSnakes[userId].logicalLength or #otherSnakes[userId].body
+                        local score = otherSnakes[userId].logicalLength or otherSnakes[userId].displayLength or #otherSnakes[userId].body
                         local displayLength = otherSnakes[userId].displayLength or #otherSnakes[userId].body
                         
                         -- 用专属锚点Part绑定，每帧更新锚点位置到该玩家蛇头坐标
@@ -806,7 +836,7 @@ function SnakeGame3DView.Init()
             if localLengthLabel then
                 local localHeadPos = localPlayerSnakeState.body[1]
                 if localHeadPos then
-                    local score = localPlayerSnakeState.logicalLength or #localPlayerSnakeState.body
+                    local score = (clientStateRef and clientStateRef.score) or localPlayerSnakeState.displayLength or #localPlayerSnakeState.body
                     local textLabel = localLengthLabel:FindFirstChild("TextLabel")
                     if textLabel then
                         textLabel.Text = tostring(math.floor(score))
@@ -829,7 +859,7 @@ function SnakeGame3DView.Init()
             if userId ~= uid(Players.LocalPlayer.UserId) then
                 if otherSnakes[userId] and otherSnakes[userId].body and #otherSnakes[userId].body > 0 then
                     if lengthLabel then
-                        local score = otherSnakes[userId].logicalLength or #otherSnakes[userId].body
+                        local score = otherSnakes[userId].logicalLength or otherSnakes[userId].displayLength or #otherSnakes[userId].body
                         local textLabel = lengthLabel:FindFirstChild("TextLabel")
                         if textLabel then
                             textLabel.Text = tostring(math.floor(score))
@@ -939,6 +969,9 @@ function SnakeGame3DView.SpawnSnake(userId, body, color, initDisplayLength)
             body = body,
             direction = Vector3.new(1, 0, 0),
             targetDirection = Vector3.new(0, 0, 0),
+            lastServerHead = body[1],
+            lastServerAt = os.clock(),
+            serverVelocity = Vector3.new(0, 0, 0),
             isMoving = false,
             alive = true,
             userId = userId,
@@ -1079,11 +1112,41 @@ function SnakeGame3DView.ApplyHeadSync(headData)
                     snake.body[1] = snake.body[1]:Lerp(snap.h, 0.3)
                 end
             else
-                -- 其他玩家/AI：直接用服务端坐标，消除漂移
-                snake.body[1] = snap.h
+                local head = snake.body[1]
+                local dist = (snap.h - head).Magnitude
+                local now = os.clock()
+                local lastHead = snake.lastServerHead
+                local lastAt = snake.lastServerAt
+                local vel = nil
+                if lastHead and lastAt then
+                    local interval = now - lastAt
+                    if interval > 0.001 then
+                        vel = (snap.h - lastHead) / interval
+                    end
+                end
+                if (not vel) and snap.d and snap.d.Magnitude > 0.01 then
+                    vel = snap.d.Unit * SNAKE_SPEED
+                end
+                if vel then
+                    local maxSpeed = SNAKE_SPEED * 2.2
+                    if vel.Magnitude > maxSpeed then
+                        vel = vel.Unit * maxSpeed
+                    end
+                end
+                snake.serverVelocity = vel or Vector3.new(0, 0, 0)
+                snake.lastServerHead = snap.h
+                snake.lastServerAt = now
+                if dist > OTHER_SNAKE_MAX_TELEPORT_DIST then
+                    local delta = snap.h - head
+                    for i = 1, #snake.body do
+                        snake.body[i] = snake.body[i] + delta
+                    end
+                end
                 if snap.d and snap.d.Magnitude > 0.01 then
                     snake.targetDirection = snap.d
                     snake.isMoving = true
+                else
+                    snake.isMoving = false
                 end
             end
         end
@@ -1146,10 +1209,41 @@ function SnakeGame3DView.UpdateFood(foodList)
         end
     end
 
+    local renderIds = {}
+    if isMobile and #foodList > MOBILE_FOOD_RENDER_LIMIT then
+        local headPos = (localPlayerSnakeState and localPlayerSnakeState.body and localPlayerSnakeState.body[1]) or nil
+        local count = 0
+        if headPos then
+            for _, data in ipairs(foodList) do
+                if count >= MOBILE_FOOD_RENDER_LIMIT then break end
+                if (data.pos - headPos).Magnitude <= MOBILE_FOOD_NEAR_RADIUS then
+                    renderIds[data.id] = true
+                    count += 1
+                end
+            end
+        end
+        if count < MOBILE_FOOD_RENDER_LIMIT then
+            for _, data in ipairs(foodList) do
+                if count >= MOBILE_FOOD_RENDER_LIMIT then break end
+                if not renderIds[data.id] then
+                    renderIds[data.id] = true
+                    count += 1
+                end
+            end
+        end
+    else
+        for _, data in ipairs(foodList) do
+            renderIds[data.id] = true
+        end
+    end
+
     local newActiveParts = {}
 
     for _, data in ipairs(foodList) do
         local id = data.id
+        if not renderIds[id] then
+            continue
+        end
         local part = activeFoodParts[id]
 
         local value = data.value
@@ -1170,7 +1264,8 @@ function SnakeGame3DView.UpdateFood(foodList)
         end
 
         if not part then
-            part = createPart(gameFolder, color, size, Enum.PartType.Ball, Enum.Material.Neon)
+            local foodMaterial = isMobile and Enum.Material.SmoothPlastic or Enum.Material.Neon
+            part = createPart(gameFolder, color, size, Enum.PartType.Ball, foodMaterial)
             activeFoodParts[id] = part
         end
 

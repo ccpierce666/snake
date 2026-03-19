@@ -1094,7 +1094,7 @@ local function moveSnakes()
                 local growth = FOOD_GROWTH_MAP[f.value or 1] or 2
                 SnakeGameService:AddSnakeLength(uidNum(k), growth)
                 if not s.isAI then
-                    local moneyGain = math.max(2, (f.value or 1) * 2)
+                    local moneyGain = math.max(10, (f.value or 1) * 10)
                     playerMoney[k] = (playerMoney[k] or 0) + moneyGain
                     local pid = uidNum(k)
                     local p = (pid and pid > 0) and Players:GetPlayerByUserId(pid) or nil
@@ -1227,7 +1227,7 @@ local function moveSnakes_UNUSED()
                     
                     -- 每吃 1 个食物获得 1 金钱 (1:1)（AI 不累计金钱）
                     if not s.isAI then
-                        local moneyGain = math.max(2, (f.value or 1) * 2)
+                        local moneyGain = math.max(10, (f.value or 1) * 10)
                         playerMoney[k] = (playerMoney[k] or 0) + moneyGain
                         local pid = uidNum(k)
                         local p = (pid and pid > 0) and Players:GetPlayerByUserId(pid) or nil

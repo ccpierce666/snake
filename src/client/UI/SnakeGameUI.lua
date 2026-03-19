@@ -133,6 +133,7 @@ local function menuBtn(label, bgColor, props)
             Size = UDim2.new(0, iconSize, 0, iconSize),
             Image = props.Icon,
             ImageColor3 = Color3.new(1, 1, 1),
+            ZIndex = 2,
         })
     end
     
@@ -155,6 +156,7 @@ local function menuBtn(label, bgColor, props)
         Name = props.Name or label,
         TextYAlignment = Enum.TextYAlignment.Bottom,
         TextWrapped = true,
+        ZIndex = 1,
     }
     
     if props.onActivated then
@@ -830,28 +832,31 @@ function SnakeGameUIRoot:render()
                 LayoutOrder = 2,
             }),
         }),
-
-        -- Menu Buttons Grid
-        MenuGrid = el("Frame", {
-            Size = UDim2.new(0, 160, 0, 150),
-            BackgroundTransparency = 1,
+        
+        -- Skin Button
+        SkinBtn = el("TextButton", {
+            Name = "SkinButton",
+            Size = UDim2.new(0, 40, 0, 40),
+            BackgroundColor3 = Color3.fromRGB(228, 139, 68),
+            BorderSizePixel = 0,
+            Text = "",
+            [Roact.Event.Activated] = SnakeGameUI.Callbacks.onToggleSkin,
             LayoutOrder = 2,
         }, {
-            UIGridLayout = el("UIGridLayout", {
-                CellSize = UDim2.new(0, 70, 0, 70),
-                CellPadding = UDim2.new(0, 10, 0, 10),
-                SortOrder = Enum.SortOrder.LayoutOrder,
+            UICorner = el("UICorner", { CornerRadius = UDim.new(0, 8) }),
+            UIStroke = el("UIStroke", {
+                Color = Color3.new(0, 0, 0),
+                Thickness = 1,
+                ApplyStrokeMode = Enum.ApplyStrokeMode.Border,
             }),
-            SkinBtn = menuBtn("", Color3.fromRGB(228, 139, 68), {
-                Name = "SkinButton",
-                Size = UDim2.new(0, 26, 0, 26),
-                IconSize = 22,
-                Icon = "rbxassetid://94001317361506",
-                onActivated = SnakeGameUI.Callbacks.onToggleSkin,
-                LayoutOrder = 3,
-                Children = {
-                    UICorner = el("UICorner", { CornerRadius = UDim.new(0, 2) }),
-                },
+            IconImage = el("ImageLabel", {
+                BackgroundTransparency = 1,
+                Position = UDim2.new(0.5, 0, 0.5, 0),
+                AnchorPoint = Vector2.new(0.5, 0.5),
+                Size = UDim2.new(0, 22, 0, 22),
+                Image = "rbxassetid://94001317361506",
+                ImageColor3 = Color3.new(1, 1, 1),
+                ZIndex = 2,
             }),
         }),
     })

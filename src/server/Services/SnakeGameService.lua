@@ -1052,11 +1052,11 @@ local function moveSnakes()
 
             if myScore > otherScore then
                 killSnake(otherK, otherSnake, k, s)
-                SnakeGameService:AddSnakeLength(uidNum(k), otherSnake.displayLength or #otherSnake.body)
+                SnakeGameService:AddSnakeLength(uidNum(k), otherSnake.score or 0)
                 killed[otherK] = true
             elseif otherScore > myScore then
                 killSnake(k, s, otherK, otherSnake)
-                SnakeGameService:AddSnakeLength(uidNum(otherK), s.displayLength or #s.body)
+                SnakeGameService:AddSnakeLength(uidNum(otherK), s.score or 0)
                 killed[k] = true
                 break
             else

@@ -1065,8 +1065,6 @@ function SnakeGame3DView.UpdateSnakeData(userId, data)
             snake.color = data.color
         end
         if data.body then
-            -- 避免吃食物/生长时整条 body 替换导致“闪现”
-            -- 策略：只校正蛇头（小偏差 lerp，大偏差 snap），长度只在尾部增减
             local serverBody = data.body
             if #serverBody > 0 then
                 local localBody = snake.body or {}
@@ -1075,9 +1073,12 @@ function SnakeGame3DView.UpdateSnakeData(userId, data)
                     snake.body = serverBody
                     return
                 end
-                -- 只调整段数，坐标由 ApplyHeadSync 每 3 帧管理，防止食物事件闪现
+                
+                -- 更新身体位置和长度
                 local targetLen = #serverBody
                 local curLen = #localBody
+                
+                -- 调整段数
                 if curLen < targetLen then
                     for i = curLen + 1, targetLen do
                         table.insert(localBody, serverBody[i] or localBody[curLen])
@@ -1087,6 +1088,13 @@ function SnakeGame3DView.UpdateSnakeData(userId, data)
                         table.remove(localBody)
                     end
                 end
+                
+                -- 直接更新整个身体的位置，确保与服务器同步
+                -- 这样可以避免其他玩家的蛇移动痕迹半天才刷新出来的问题
+                for i = 1, math.min(#localBody, #serverBody) do
+                    localBody[i] = serverBody[i]
+                end
+                
                 snake.body = localBody
             end
         end

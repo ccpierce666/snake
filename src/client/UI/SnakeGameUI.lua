@@ -175,6 +175,19 @@ local function buildLeaderboard(state)
         Padding = UDim.new(0, 2),
     })
 
+    local localPlayerRank = nil
+    local localPlayerEntry = nil
+    
+    -- 先找到当前玩家的排名
+    for i, e in ipairs(state.leaderboard or {}) do
+        if e.userId == Players.LocalPlayer.UserId then
+            localPlayerRank = i
+            localPlayerEntry = e
+            break
+        end
+    end
+    
+    -- 显示前4名
     for i, e in ipairs(state.leaderboard or {}) do
         if i <= 4 then
             local name = e.name or "Player"
@@ -187,6 +200,18 @@ local function buildLeaderboard(state)
                 LayoutOrder = i,
             })
         end
+    end
+    
+    -- 如果当前玩家不在前4名，显示当前玩家的排名
+    if localPlayerRank and localPlayerRank > 4 and localPlayerEntry then
+        children["LocalPlayerRow"] = Roui.LeaderboardRow({
+            Rank = localPlayerRank,
+            Name = localPlayerEntry.name:sub(1, 10) or "Player",
+            Score = formatNumber(localPlayerEntry.score or 0),
+            UserId = localPlayerEntry.userId,
+            Highlight = true,
+            LayoutOrder = 5,
+        })
     end
 
     return Roui.Leaderboard({

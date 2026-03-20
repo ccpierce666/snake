@@ -473,24 +473,41 @@ function SnakeGameController:KnitStart()
     end
 
     task.spawn(function()
-        for i = 1, 8 do
+        -- 增加连接超时时间和重试次数
+        for i = 1, 15 do
             local success, snapshot = pcall(function()
-                return SnakeGameService:SubscribeRealtime()
+                -- 增加超时保护
+                local startTime = os.clock()
+                local result
+                local thread = task.spawn(function()
+                    result = SnakeGameService:SubscribeRealtime()
+                end)
+                -- 等待最多3秒
+                repeat task.wait(0.1) until result ~= nil or os.clock() - startTime > 3
+                if os.clock() - startTime > 3 then
+                    task.cancel(thread)
+                    error("SubscribeRealtime timeout")
+                end
+                return result
             end)
             if success and snapshot and snapshot.state and snapshot.state.snakes then
                 print("[SnakeGameController] 长连接快照就绪 (第" .. i .. "次)")
                 applyRealtimeSnapshot(snapshot)
                 return
             end
-            task.wait(0.2)
+            task.wait(0.5)  -- 增加重试间隔
         end
 
+        print("[SnakeGameController] 长连接失败，尝试回退方案")
+
+        -- 分步获取数据，增加错误处理
         local successGift, giftData = pcall(function()
             return SnakeGameService:GetGiftData()
         end)
         if successGift and giftData then
             ClientState.giftData = giftData
         end
+
         local successSkin, skinData = pcall(function()
             return SnakeGameService:GetSkinData()
         end)
@@ -498,9 +515,45 @@ function SnakeGameController:KnitStart()
             ClientState.skinData = skinData
         end
 
-        for i = 1, 20 do
+        local successSpins, spins = pcall(function() 
+            return SnakeGameService:GetSpins() 
+        end)
+        if successSpins and spins ~= nil then
+            ClientState.spins = spins
+        end
+
+        local successSpeed, speedMult = pcall(function() 
+            return SnakeGameService:GetSpeedMultiplier() 
+        end)
+        if successSpeed and speedMult and speedMult >= 2 then
+            ClientState.speedMultiplier = 2
+            SnakeGame3DView.SetSpeedMultiplier(2)
+        end
+
+        local successSize, sizeMult = pcall(function() 
+            return SnakeGameService:GetSizeMultiplier() 
+        end)
+        if successSize and sizeMult and sizeMult >= 2 then
+            ClientState.sizeMultiplier = 2
+            SnakeGame3DView.SetLocalSizeMultiplier(2)
+        end
+
+        -- 尝试获取游戏状态
+        for i = 1, 25 do
             local success, state = pcall(function()
-                return SnakeGameService:GetGameState()
+                -- 增加超时保护
+                local startTime = os.clock()
+                local result
+                local thread = task.spawn(function()
+                    result = SnakeGameService:GetGameState()
+                end)
+                -- 等待最多3秒
+                repeat task.wait(0.1) until result ~= nil or os.clock() - startTime > 3
+                if os.clock() - startTime > 3 then
+                    task.cancel(thread)
+                    error("GetGameState timeout")
+                end
+                return result
             end)
 
             if success and state and state.snakes then
@@ -538,29 +591,13 @@ function SnakeGameController:KnitStart()
                     end
                 end
 
-                local okSpins, spins = pcall(function() return SnakeGameService:GetSpins() end)
-                if okSpins and spins ~= nil then
-                    ClientState.spins = spins
-                end
-
-                local okSpeed, mult = pcall(function() return SnakeGameService:GetSpeedMultiplier() end)
-                if okSpeed and mult and mult >= 2 then
-                    ClientState.speedMultiplier = 2
-                    SnakeGame3DView.SetSpeedMultiplier(2)
-                end
-
-                local okSize, sm = pcall(function() return SnakeGameService:GetSizeMultiplier() end)
-                if okSize and sm and sm >= 2 then
-                    ClientState.sizeMultiplier = 2
-                    SnakeGame3DView.SetLocalSizeMultiplier(2)
-                end
-
                 requestUiUpdate(true)
                 return
             end
-
-            task.wait(0.2)
+            task.wait(0.2)  -- 增加重试间隔
         end
+
+        print("[SnakeGameController] 无法连接到服务器，进入离线模式")
     end)
 
     -- 7. WASD 输入处理（相对摄像机方向）

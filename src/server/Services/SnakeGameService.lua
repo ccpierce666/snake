@@ -867,15 +867,44 @@ end
 
 buildRealtimeSnapshot = function(player)
     local key = uid(player.UserId)
-    return {
+    -- 增加错误处理，确保即使部分数据加载失败也能返回快照
+    local snapshot = {
         state = getGameStatePrivate(),
-        giftData = playerDailyGifts[key] or loadGiftData(player.UserId),
-        spins = playerSpins[key] or 0,
-        speedMultiplier = playerSpeedMultiplier[key] or 1,
-        sizeMultiplier = playerSizeMultiplier[key] or 1,
-        money = playerMoney[key] or loadMoney(player.UserId),
-        skinData = buildSkinData(player.UserId),
+        giftData = nil,
+        spins = 0,
+        speedMultiplier = 1,
+        sizeMultiplier = 1,
+        money = 0,
+        skinData = nil,
     }
+    
+    -- 分步加载数据，增加错误处理
+    local success, giftData = pcall(function()
+        return playerDailyGifts[key] or loadGiftData(player.UserId)
+    end)
+    if success then
+        snapshot.giftData = giftData
+    end
+    
+    snapshot.spins = playerSpins[key] or 0
+    snapshot.speedMultiplier = playerSpeedMultiplier[key] or 1
+    snapshot.sizeMultiplier = playerSizeMultiplier[key] or 1
+    
+    local successMoney, money = pcall(function()
+        return playerMoney[key] or loadMoney(player.UserId)
+    end)
+    if successMoney then
+        snapshot.money = money
+    end
+    
+    local successSkin, skinData = pcall(function()
+        return buildSkinData(player.UserId)
+    end)
+    if successSkin then
+        snapshot.skinData = skinData
+    end
+    
+    return snapshot
 end
 
 local function killSnake(vKey, vSnake, kKey, kSnake)
@@ -1448,6 +1477,19 @@ function SnakeGameService:KnitInit()
                 end
             end
             SnakeSyncSignal:Fire(headData)
+        end
+        
+        -- 每 10 帧广播一次完整游戏状态（包括蛇、食物、排行榜）
+        -- 确保所有客户端都能及时收到游戏状态更新
+        stateSnapshotCounter = stateSnapshotCounter or 0
+        stateSnapshotCounter = stateSnapshotCounter + 1
+        if stateSnapshotCounter >= 10 then
+            stateSnapshotCounter = 0
+            local state = getGameStatePrivate()
+            for _, player in ipairs(game.Players:GetPlayers()) do
+                local snapshot = buildRealtimeSnapshot(player)
+                StateSnapshotSignal:FireTo(player, snapshot)
+            end
         end
     end)
     
